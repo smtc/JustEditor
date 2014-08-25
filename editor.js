@@ -217,4 +217,5 @@
     editor.init()
   }
 
+  this.justeditor = justeditor
 }).call(this);
