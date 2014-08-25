@@ -1,0 +1,21 @@
+{
+  "name": "JustEditor",
+  "version": "1.0.0",
+  "homepage": "https://github.com/smtc/JustEditor",
+  "description": "JustEditor is a wysiwyg editor",
+  "main": "dist/editor.js",
+  "keywords": [
+    "editor"
+  ],
+  "authors": [
+    "guotie.9@gmail.com"
+  ],
+  "license": "MIT",
+  "ignore": [
+    "**/.*",
+    "node_modules",
+    "bower_components",
+    "test",
+    "tests"
+  ]
+}
