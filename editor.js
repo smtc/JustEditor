@@ -161,6 +161,16 @@
   Button.prototype = {
     render: function() {
       // render button
+      return '<a tabindex="-1" unselectable="on" class="toolbar-item toolbar-item-' +
+        this.name + '" v-class="active: status.' + this.tag +
+        '" href="javascript:;" title="' +
+        this.title +
+        '"><span class="' +
+        this.icon +
+        '"></span></a>' +
+        (typeof this.menu === 'string' ? this.menu :
+            (this.menu ? (typeof this.menu.render === 'Function' ? this.menu.render() : '') : '')
+            )
     },
     onclick: function() {
 
@@ -193,6 +203,9 @@
 
   }
 
+  var defaultOptions = {
+      toolbars: ['title', 'bold', 'italic', 'underline', 'strike', 'sp', 'ol', 'ul', 'indent', 'outdent', 'quote', 'hr', 'sp', 'table']
+  }
   /**
    *	JustEditor
    *
@@ -200,22 +213,55 @@
    */
   var JustEditor = function(selector, options) {
     this.$buttons = []
-    this.$body = typeof selector === 'String' ? document.getElementById(selector) : selector
+    this.options = _extend(defaultOptions, options || {})
+
+    this.$editor = typeof selector === 'string' ? document.getElementById(selector) : selector
 
     // the cursor point element
     this.$currentEl = null
+    console.log(this.$editor, typeof selector)
+    this.init()
   }
 
   JustEditor.prototype = {
     init: function() {
+        // create editor's element
+        this.$toolbar = document.createElement('div')
+        this.$toolbar.setAttribute('class', 'je-toolbar')
+        this.$menuUl = document.createElement('ul')
+        this.$toolbar.appendChild(this.$menuUl)
 
+        // create contenteditable div as body
+        this.$body = document.createElement('div')
+        this.$body.setAttribute('contenteditable', true)
+        this.$body.setAttribute('class', 'je-body')
+
+        console.log(this.$editor)
+        this.$editor.appendChild(this.$toolbar)
+        this.$editor.appendChild(this.$body)
+
+        this.buildToolbar()
+    },
+    buildToolbar: function() {
+        var name, $toolbar, btn;
+        for(var i = 0; i < this.options.toolbars.length; i ++) {
+            name = this.options.toolbars[i]
+            $toolbar = document.createElement('li')
+            if (name === 'sp') {
+                $li.innerHTML = '<span class="separator"></span>'
+                this.$menuUl.appendChild($li)
+                continue
+            } else {
+                btn = new buttons[name]
+            }
+        }
     }
   }
 
   function justeditor(selector, options) {
     var editor = new JustEditor(selector, options)
-    editor.init()
   }
 
+  this.JustEditor = JustEditor
   this.justeditor = justeditor
 }).call(this);
