@@ -16,6 +16,7 @@
 
     //dom functions
 
+    buttons = {},
     root = this;
 
   var browser = (function() {
@@ -37,28 +38,29 @@
     return ret
   })()
 
+  buttons.register = function(btn) {
+    if (!btn || !btn.prototype.name) {
+        console.log("Warning: btn is null or btn.prototype.name is null", btn)
+        return;
+    }
+    if (!buttons[btn.prototype.name]) {
+        buttons[btn.prototype.name] = btn
+        console.log("register "+btn.prototype.name+" :", btn)
+    }
+  }
+
   function _extend(source, obj) {
     for (var prop in source) {
-      obj[prop] = source[prop]
+      if(!obj[prop]) {
+          obj[prop] = source[prop]
+      }
     }
     return obj
   }
 
   // backbone extend
-  function extend(protoProps) {
+  function extend(child, props) {
     var parent = this
-    var child;
-
-    // The constructor function for the new subclass is either defined by you
-    // (the "constructor" property in your `extend` definition), or defaulted
-    // by us to simply call the parent's constructor.
-    if (protoProps && _.has(protoProps, 'constructor')) {
-      child = protoProps.constructor;
-    } else {
-      child = function() {
-        return parent.apply(this, arguments);
-      };
-    }
 
     // Add static properties to the constructor function, if supplied.
     _extend(parent, child);
@@ -71,9 +73,9 @@
     Surrogate.prototype = parent.prototype;
     child.prototype = new Surrogate;
 
-    // Add prototype properties (instance properties) to the subclass,
-    // if supplied.
-    if (protoProps) _extend(protoProps, child.prototype);
+    if (props) {
+        _extend(props, child.prototype)
+    }
 
     // Set a convenience property in case the parent's prototype is needed
     // later.
@@ -138,32 +140,29 @@
    *
    */
   var Button = function(argument) {
-    // basic attributes
-    this.name = ''
-    this.title = ''
-    this.icon = ''
-    this.tag = ''
-    this.command = ''
-    this.status = ''
-    // typ:
-    // basic: no menu, just call execCommand
-    // custom: no menu, custon function to deal
-    // menu: menu show up
-    this.typ = 'basic'
-
-    // when this button is active, the exclue buttons should be disabled
-    this.exclueButtons = []
-    // on init, set the $button element
-    this.$el = null
-    this.$exclueButtons = []
+    var arg = argument || {}
+    var btn = function() {
+        this.status = arg.status || ''
+        // on init, set the $button element
+        this.$el = null
+        this.$exclueButtons = []
+    }
+    return btn
   }
 
   Button.prototype = {
-    render: function() {
+    init: function() {
+      var $li = document.createElement('li')
+      if (typeof this.command === 'string') {
+         $li.setAttribute('data-cmd', this.command)
+      }
+      if (this.tag) {
+         $li.setAttribute('data-tag', this.tag)
+      }
+      $li.addEventListener('click', this.onclick)
       // render button
-      return '<a tabindex="-1" unselectable="on" class="toolbar-item toolbar-item-' +
-        this.name + '" v-class="active: status.' + this.tag +
-        '" href="javascript:;" title="' +
+      $li.innerHTML = '<a tabindex="-1" unselectable="on" class="toolbar-item toolbar-item-' +
+        this.name + '" class="active: false" href="javascript:;" title="' +
         this.title +
         '"><span class="' +
         this.icon +
@@ -171,20 +170,71 @@
         (typeof this.menu === 'string' ? this.menu :
             (this.menu ? (typeof this.menu.render === 'Function' ? this.menu.render() : '') : '')
             )
+      this.$li = $li
     },
     onclick: function() {
 
     },
     exec: function() {
 
-    },
-    // render the button, 
-    // bind events
-    init: function() {
-
     }
   }
 
+  Button.extend = function(fn, props) {
+      var btn = extend.call(this, fn, props)
+      console.log(btn, btn.prototype.name, btn.name)
+      buttons.register(btn)
+  }
+
+  var TitleButton = Button.extend(Button(), {
+    name: 'title',
+    title: '标题文字',
+    icon: 'fa fa-text',
+    tag: 'title',
+    command: '',
+    status: '',
+    typ: 'basic',
+    exclueButtons: []
+  })
+    // bold button
+    var BoldButton = Button.extend(Button(), {
+        name: 'bold',
+        icon: 'fa fa-bold',
+        title: '加粗文字 ( Ctrl + b )',
+        tag: 'b',
+        command: 'bold',
+        excludeButtons: []
+    })
+    // italic button
+    var ItalicButton = Button.extend(Button(), {
+        name: 'italic',
+        icon: 'fa fa-italic',
+        title: '斜体文字 ( Ctrl + i )',
+        tagName: 'i',
+        command: 'italic',
+        menu: false,
+        excludeButtons: []
+    })
+    // underline button
+    var UnderlineButton = Button.extend(Button(), {
+        name: 'underline',
+        icon: 'fa fa-underline',
+        title: '下划线文字 ( Ctrl + u )',
+        tagName: 'u',
+        command: 'underline',
+        menu: false,
+        excludeButtons: []
+    })
+    // strike button
+    var StrikeButton = Button.extend(Button(), {
+        name: 'strike',
+        icon: 'fa fa-strikethrough',
+        title: '下划线文字 ( Ctrl + u )',
+        tag: 'strike',
+        command: 'strikethrough',
+        menu: false,
+        excludeButtons: []
+    })
   // button's menu
   var Menu = function() {
 
@@ -248,11 +298,18 @@
             name = this.options.toolbars[i]
             $toolbar = document.createElement('li')
             if (name === 'sp') {
+                var $li = document.createElement('li')
                 $li.innerHTML = '<span class="separator"></span>'
                 this.$menuUl.appendChild($li)
                 continue
             } else {
+                if(!buttons[name]) {
+                    console.log('Not found button with name ' + name)
+                    continue
+                }
                 btn = new buttons[name]
+                btn.init()
+                this.$menuUl.appendChild(btn.$li)
             }
         }
     }
