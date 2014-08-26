@@ -45,7 +45,6 @@
     }
     if (!buttons[btn.prototype.name]) {
         buttons[btn.prototype.name] = btn
-        console.log("register "+btn.prototype.name+" :", btn)
     }
   }
 
@@ -145,35 +144,86 @@
         this.status = arg.status || ''
         // on init, set the $button element
         this.$el = null
-        this.$exclueButtons = []
+        this.$exclueBtns = []
     }
     return btn
   }
 
   Button.prototype = {
     init: function() {
-      var $li = document.createElement('li')
-      if (typeof this.command === 'string') {
+      var self = this,
+          $li = document.createElement('li')
+      if (typeof this.command === 'string' && this.command) {
          $li.setAttribute('data-cmd', this.command)
       }
       if (this.tag) {
          $li.setAttribute('data-tag', this.tag)
       }
-      $li.addEventListener('click', this.onclick)
+      $li.addEventListener('click', function(event) {self.onclick.call(self, event)})
       // render button
       $li.innerHTML = '<a tabindex="-1" unselectable="on" class="toolbar-item toolbar-item-' +
         this.name + '" class="active: false" href="javascript:;" title="' +
         this.title +
         '"><span class="' +
         this.icon +
-        '"></span></a>' +
-        (typeof this.menu === 'string' ? this.menu :
-            (this.menu ? (typeof this.menu.render === 'Function' ? this.menu.render() : '') : '')
-            )
-      this.$li = $li
-    },
-    onclick: function() {
+        '"></span></a>'
+      this.$el = $li
 
+      if(this.typ === 'menu' && this.menus) {
+          this.renderMenu()
+      }
+    },
+    renderMenu: function() {
+        if (! isArray(this.menus)) {
+            return
+        }
+        var menu,
+            $menuWrapper = document.createElement('div'),
+            $menuItem,
+            $a,
+            $span,
+            $ul = document.createElement('ul')
+        $menuWrapper.setAttribute('class', 'toolbar-menu')
+        $menuWrapper.classList.add('toolbar-menu'+this.name)
+        for (var i = 0; i < this.menus.length; i ++) {
+            menu = this.menus[i]
+            $menuItem = document.createElement('li')
+            if (menu === '|') {
+                $menuItem.innerHTML = '<span class="separator"></span>'
+                $ul.appendChild($menuItem)
+                continue
+            }
+            $span = document.createElement('span')
+            $a = document.createElement('a')
+            $span.innerText = menu.text || ''
+            $a.appendChild($span)
+            $a.classList.add('menu-item')
+            $a.classList.add("menu-item"+ (menu.param||''))
+            $a.setAttribute('tabindex', -1)
+            $a.setAttribute('title', menu.text || '')
+            $a.href = "javascript:;"
+            $menuItem.setAttribute('data-param', menu.param || '')
+            $menuItem.appendChild($a)
+            $ul.appendChild($menuItem)
+        }
+        $menuWrapper.appendChild($ul)
+        this.$el.appendChild($menuWrapper)
+    },
+    liClicked: function (event) {
+        var $el
+        for ($el = event.target; $el !== this.$li; $el = $el.parentNode ) {
+            if ($el.nodeName.toLowerCase() === 'li') {
+                break
+            }
+        }
+        return $el
+    },
+    onclick: function(event) {
+        console.log(this, this.typ)
+        if (this.typ === 'menu') {
+            this.$el.classList.add('menu-on')
+        }
+        event.preventDefault()
     },
     exec: function() {
 
@@ -182,18 +232,55 @@
 
   Button.extend = function(fn, props) {
       var btn = extend.call(this, fn, props)
-      console.log(btn, btn.prototype.name, btn.name)
       buttons.register(btn)
   }
+    /*
+    // button's menu
+    var Menu = function() {
+        this.button = null
+    }
+    Menu.prototype = {
+        show: function(argument) {
+            // body...
+        },
+        hide: function() {
 
-  var TitleButton = Button.extend(Button(), {
+        },
+        render: function() {
+
+        },
+        init: function(btn) {
+            this.button = btn
+        }
+    }
+    Menu.extend = extend
+    var TextMenu = Menu.extend()
+    */
+  var TextButton = Button.extend(Button(), {
     name: 'title',
     title: '标题文字',
     icon: 'fa fa-text',
     tag: 'title',
     command: '',
     status: '',
-    typ: 'basic',
+    typ: 'menu',
+    menus:[{
+        name: 'normal',
+        text: '普通文本',
+        param: 'p'
+    }, '|', {
+        name: 'h1',
+        text: '标题 1',
+        param: 'h1'
+    }, {
+        name: 'h2',
+        text: '标题 2',
+        param: 'h2'
+    }, {
+        name: 'h3',
+        text: '标题 3',
+        param: 'h3'
+    }],
     exclueButtons: []
   })
     // bold button
@@ -235,19 +322,6 @@
         menu: false,
         excludeButtons: []
     })
-  // button's menu
-  var Menu = function() {
-
-  }
-  Menu.prototype = {
-    show: function(argument) {
-      // body...
-    },
-    hide: function() {
-
-    }
-  }
-
   // popover
   var PopOver = function() {
 
@@ -261,8 +335,10 @@
    *
    *
    */
+  var _editors = []
   var JustEditor = function(selector, options) {
     this.$buttons = []
+    this.$menuButtons = []
     this.options = _extend(defaultOptions, options || {})
 
     this.$editor = typeof selector === 'string' ? document.getElementById(selector) : selector
@@ -271,6 +347,8 @@
     this.$currentEl = null
     console.log(this.$editor, typeof selector)
     this.init()
+
+    _editors.push(this)
   }
 
   JustEditor.prototype = {
@@ -291,6 +369,7 @@
         this.$editor.appendChild(this.$body)
 
         this.buildToolbar()
+        this.bindEvents()
     },
     buildToolbar: function() {
         var name, $toolbar, btn;
@@ -309,16 +388,59 @@
                 }
                 btn = new buttons[name]
                 btn.init()
-                this.$menuUl.appendChild(btn.$li)
+                this.$menuUl.appendChild(btn.$el)
+            }
+
+            this.$buttons.push(btn)
+            if (btn.typ === 'menu') {
+                this.$menuButtons.push(btn)
             }
         }
+    },
+    bindEvents: function() {
+        for (var eh in this) {
+            if (typeof this[eh] === 'function') {
+                if (/^on*/.test(eh)) {
+                    var name = eh.replace(/^on/, '').toLowerCase()
+                    this.$body.addEventListener(name, this[eh])
+                }
+            }
+        }
+    },
+    onBlur: function(event) {
+        console.log('onBlur')
+    },
+    onFocus: function(event) {
+        console.log('onFocus')
+    },
+    onClick: function(event) {
+        console.log('onClick')
+    },
+    onMouseDown: function(event) {
+        console.log('onMouseDown')
+    },
+    onMouseUp: function(event) {
+        console.log('onMouseUp')
+    },
+    onKeydown: function(event) {
+        console.log('onKeydown')
+    },
+    onKeyup: function(event) {
+        console.log('onKeyup')
     }
   }
 
-  function justeditor(selector, options) {
-    var editor = new JustEditor(selector, options)
-  }
-
   this.JustEditor = JustEditor
-  this.justeditor = justeditor
+
+  // hide all menus
+  this.addEventListener('click', function() {
+      var e, $menu;
+      for (var i = 0; i < _editors.length; i ++) {
+          e = _editors[i]
+          for (var j = 0; j < e.$menuButtons.length; j ++) {
+              $menu = e.$menuButtons[j]
+              //$menu.$el.classList.remove('menu-on')
+          }
+      }
+  })
 }).call(this);
