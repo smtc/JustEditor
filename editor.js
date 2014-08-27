@@ -21,22 +21,71 @@
 
   var browser = (function() {
     // body...
-    var ret = Object.create(null),
-      inBrowser = typeof window !== 'undefined' && toString.call(window) !== '[object Object]';
-
-    if (inBrowser) {
-      ret.version = ''
-      ret.vendor = ''
-    } else {
-      ret.version = ''
-      ret.vendor = 'node'
-    }
-
-    // os: windows | linux | mac | Android | iOS | WP ...
-    ret.os = ''
-
-    return ret
+      var chrome, firefox, ie, safari, ua;
+      ua = navigator.userAgent;
+      ie = /(msie|trident)/i.test(ua);
+      chrome = /chrome|crios/i.test(ua);
+      safari = /safari/i.test(ua) && !chrome;
+      firefox = /firefox/i.test(ua);
+      if (ie) {
+          return {
+              msie: true,
+              pbr: '',
+              version: ua.match(/(msie |rv:)(\d+(\.\d+)?)/i)[2] * 1
+          };
+      } else if (chrome) {
+          return {
+              webkit: true,
+              chrome: true,
+              pbr: '<br>',
+              version: ua.match(/(?:chrome|crios)\/(\d+(\.\d+)?)/i)[1] * 1
+          };
+      } else if (safari) {
+          return {
+              webkit: true,
+              safari: true,
+              pbr: '',
+              version: ua.match(/version\/(\d+(\.\d+)?)/i)[1] * 1
+          };
+      } else if (firefox) {
+          return {
+              mozilla: true,
+              firefox: true,
+              pbr: '',
+              version: ua.match(/firefox\/(\d+(\.\d+)?)/i)[1] * 1
+          };
+      } else {
+          return {};
+      }
   })()
+
+  browser.createEmptyP = function($parent, $beforeEl) {
+      var sel = window.getSelection()
+      if (!sel || !sel.rangeCount) {
+          console.log('selection is null or no range!', sel)
+          return
+      }
+      var range = sel.getRangeAt(0),
+          $p = document.createElement("p");
+
+      // chrome浏览器中, p元素至少要有一个元素, range才能setStart成功
+      $p.innerHTML = browser.pbr
+
+      if ($beforeEl) {
+          $parent.insertBefore($p, $beforeEl)
+      } else {
+          $parent.appendChild($p)
+      }
+      // range设置为$p的第一个节点
+      range.setStart($p, 0)
+      // range collapse在开头位置
+      range.collapse(true);
+      // range加入到sel中
+      sel.removeAllRanges();
+      sel.addRange(range);
+
+      return $p
+  }
 
   buttons.register = function(btn) {
     if (!btn || !btn.prototype.name) {
@@ -50,9 +99,7 @@
 
   function _extend(source, obj) {
     for (var prop in source) {
-      if(!obj[prop]) {
           obj[prop] = source[prop]
-      }
     }
     return obj
   }
@@ -120,13 +167,12 @@
     },
     fire: function(name, a, b, c) {
       if (!this.events) return this;
-      var events = this.events[name],
-        args = slice.call(arguments, 1);
+      var events = this.events[name]
       if (events) {
       	var event
       	for (var i = 0; i < events.length; i ++) {
       		event = events[i]
-      		events.cb.call(event.ctx, a, b, c)
+      		event.cb.call(event.ctx, name, a, b, c)
       	}
       }
       return this
@@ -150,7 +196,7 @@
   }
 
   Button.prototype = {
-    init: function() {
+    init: function(editor) {
       var self = this,
           $li = document.createElement('li')
       if (typeof this.command === 'string' && this.command) {
@@ -168,21 +214,25 @@
         this.icon +
         '"></span></a>'
       this.$el = $li
+      this.$a = $li.firstChild
+      // set editor
+      this.editor = editor
 
-      if(this.typ === 'menu' && this.menus) {
+      if(this.typ === 'menu') {
           this.renderMenu()
       }
     },
     renderMenu: function() {
         if (! isArray(this.menus)) {
+            console.log('this.menus is NOT Array!')
             return
         }
         var menu,
             $menuWrapper = document.createElement('div'),
+            $ul = document.createElement('ul'),
             $menuItem,
             $a,
-            $span,
-            $ul = document.createElement('ul')
+            $span;
         $menuWrapper.setAttribute('class', 'toolbar-menu')
         $menuWrapper.classList.add('toolbar-menu'+this.name)
         for (var i = 0; i < this.menus.length; i ++) {
@@ -219,20 +269,45 @@
         return $el
     },
     onclick: function(event) {
-        console.log(this, this.typ)
         if (this.typ === 'menu') {
-            this.$el.classList.add('menu-on')
+            var $el = this.liClicked(event)
+            if ($el === this.$li) {
+                this.$el.classList.toggle('menu-on')
+            } else {
+                // hide menu
+                this.$el.classList.remove('menu-on')
+                // exec the command
+                var cmd = $el.getAttribute('data-param')
+                this.execMenuCmd && this.execMenuCmd(event, cmd)
+            }
+        } else if (this.typ === 'basic') {
+            this.command && document.execCommand(this.command, false)
+        } else {
+            this.exec(event)
         }
+        this.editor.fire('statusChange')
         event.preventDefault()
+        event.stopPropagation()
+        return false
     },
-    exec: function() {
-
+    exec: function(event) {
+    },
+    updateStatus: function(event) {
+        if (this.typ === 'basic') {
+            if ( document.queryCommandState(this.command) === true ) {
+                this.$a.classList.add('active')
+            } else {
+                this.$a.classList.remove('active')
+            }
+        }
     }
   }
+    _extend(Event, Button.prototype)
 
   Button.extend = function(fn, props) {
       var btn = extend.call(this, fn, props)
       buttons.register(btn)
+      return btn
   }
     /*
     // button's menu
@@ -283,12 +358,17 @@
     }],
     exclueButtons: []
   })
+
+  TextButton.prototype.execMenuCmd = function(event, cmd) {
+
+  }
     // bold button
     var BoldButton = Button.extend(Button(), {
         name: 'bold',
         icon: 'fa fa-bold',
         title: '加粗文字 ( Ctrl + b )',
         tag: 'b',
+        typ: 'basic',
         command: 'bold',
         excludeButtons: []
     })
@@ -322,6 +402,427 @@
         menu: false,
         excludeButtons: []
     })
+    Button.extend(Button(), {
+        name: 'hr',
+        icon: 'fa fa-minus',
+        title: '分割线',
+        tag: 'hr',
+        typ: 'custom',
+        exec: function() {
+            var editor = this.editor
+            if (!editor.$currentEl) {
+                return
+            }
+            var $hr = document.createElement('hr')
+            editor.$body.insertBefore($hr, this.$currentEl.nextSibling)
+
+            editor.$body.focus()}
+    })
+    Button.extend(Button(), {
+        name: 'indent',
+        icon: 'fa fa-indent',
+        title: '向右缩进 ( Tab ) ',
+        tag: 'indent',
+        typ: 'custom',
+        exec: function() {
+        }
+    })
+    Button.extend(Button(), {
+        name: 'outdent',
+        icon: 'fa fa-outdent',
+        title: '向左缩进 ( Shift + Tab ) ',
+        tag: 'outdent',
+        typ: 'custom',
+        exec: function() {}
+    })
+    Button.extend(Button(), {
+        name: 'quote',
+        icon: 'fa fa-quote-left',
+        title: '引用',
+        tag: 'blockquote',
+        typ: 'custom',
+        exec: function() {}
+    })
+    /**
+     *  list
+     */
+    // 将ul或ol下的li元素修改为ol或ul下的li元素, 将当前的ul或ol元素break为多个元素
+    // $body 为 $jeBody
+    // $list为当前的list元素: ul or ol
+    // $li为当前的li元素
+    // to为变成的tagName: ul or ol
+    function convertLi($list, to) {
+        var $p = $list.parentNode,
+            $li,
+            tagname = $list.nodeName,
+            $nlist = document.createElement(to);   // new list
+        var $headList,
+            $tailList,
+            $el, $tmp;
+        var sel = window.getSelection(),
+            range = sel.getRangeAt(0),
+            $ec = range.endContainer,
+            eo = range.endOffset
+
+        for ($li = $ec; $li !== $list && $li.nodeName.toLowerCase() !== 'li'; ) {
+            $li = $li.parentNode
+        }
+        if ($li.nodeName.toLowerCase() !== 'li') {
+            throw new Error('Not found li element in converLi');
+        }
+
+        // $li不是$list的第一个元素时, 将break出一个headList
+        if ($list.firstChild !== $li) {
+            $headList = document.createElement(tagname)
+            console.log($list, $list.firstChild)
+            for ($el = $list.firstChild; $el !== $li; ) {
+                $tmp = $el.nextSibling
+                $headList.appendChild($el)
+                $el = $tmp
+            }
+            $p.insertBefore($headList, $list)
+        }
+
+        // $li不是list的最后一个元素, break出一个tailList
+        if ($list.lastChild !== $li) {
+            $tailList = document.createElement(tagname)
+            for ($el = $li.nextSibling; $el !== $list.lastChild; ) {
+                $tmp = $el.nextSibling
+                $tailList.appendChild($el)
+                $el = $tmp
+            }
+            $tailList.appendChild($list.lastChild)
+        }
+
+        // 新的节点
+        if (to === 'p') {
+            for (var $child = $li.firstChild; $child !== $li.lastChild; ) {
+                $tmp = $child.nextSibling
+                $nlist.appendChild($child)
+                $child = $tmp
+            }
+            if ($child) {
+                $nlist.appendChild($child)
+            }
+        } else {
+            $nlist.appendChild($li)
+        }
+
+        $p.insertBefore($nlist, $list)
+        if($tailList) {
+            $p.insertBefore($tailList, $list)
+        }
+
+        // 光标
+        var ecName = $ec.nodeName.toLowerCase()
+        if (ecName === 'li' || ecName === 'ul' || ecName === 'ol') {
+            range.setEnd($nlist, 0)
+            range.collapse(true)
+        } else {
+            range.setEnd($ec, eo)
+        }
+        sel.removeAllRanges()
+        sel.addRange(range);
+
+        // 移除原来的list
+        $p.removeChild($list)
+    }
+    // 将当前非list元素convert为list元素
+    function convertToList($cu, to) {
+        var $nlist = document.createElement(to),
+            $li = document.createElement('li'),
+            $p = $cu.parentNode,
+            sel = window.getSelection(),
+            range = sel.getRangeAt(0),
+            $ec = range.endContainer,
+            eo = range.endOffset
+
+        console.log('b0: convertToList:', $ec, eo)
+        //$li.innerHTML = $cu.innerHTML
+        for (var $el = $cu.firstChild; $el !== $cu.lastChild; $el = $el.nextSibling) {
+            $li.appendChild($el)
+        }
+        if ($el) {
+            $li.appendChild($el)
+        }
+
+        $nlist.appendChild($li)
+        $p.insertBefore($nlist, $cu)
+        if ($ec === $cu) {
+            console.log('b1 convert to list, set range: ', range.endContainer, range.endOffset)
+            range.setEnd($li, eo)
+            range.collapse(true)
+        } else {
+            console.log('b2 convert to list, set range: ', range.endContainer, range.endOffset)
+            range.setEnd($ec, eo)
+            range.collapse(true)
+        }
+        sel.removeAllRanges();
+        sel.addRange(range);
+
+        $p.removeChild($cu)
+        // 光标位置？
+    }
+
+    // break list
+    // 将olist的子元素移动到新的list中
+    // $olist: old list
+    // $nlist: new list
+    // $li:    start or end li element, depend on fromHead
+    function breakList($olist, $nlist, $li, fromHead) {
+        var $el,
+            $tmp,
+            $end
+
+        if (fromHead) {
+            $el = $olist.firstChild
+            $end = $li
+        } else {
+            $el = $li
+            $end = $olist.lastChild
+        }
+
+        for(; $el && $el !== $end; ) {
+            $tmp = $el.nextSibling
+            $nlist.appendChild($el)
+            $el = $tmp
+        }
+        if ($el) {
+            $nlist.appendChild($el)
+        }
+    }
+
+    // 获取range中的所有元素
+    function getRangeElements(range) {
+        var $start = range.startContainer,
+            $end = range.endContainer,
+            $el,
+            $tmp,
+            $first,
+            $last,
+            ret = []
+
+        if (range.collapsed) {
+            return [this.$currentEl]
+        }
+
+        for($first = $start; $first !== this.$body && $first.parentNode !== this.$body;) {
+            $tmp = $first
+            $first = $first.parentNode
+        }
+
+        if ($first === this.$body) {
+            return []
+        }
+
+        if ($first.nodeName.toLowerCase() === 'ul' || $first.nodeName.toLowerCase() === 'ol') {
+            ret.push([$first, $tmp])
+        } else {
+            ret.push($first)
+        }
+
+        for ($last = $end; $last !== this.$body && $last.parentNode !== this.$body;) {
+            $tmp = $last
+            $last = $last.parentNode
+        }
+
+        if ($last === this.$body) {
+            return []
+        }
+
+        // 将每个element加入到ret中
+        for ($el = $first.nextSibling; $el && $el !== $last; $el = $el.nextSibling) {
+            ret.push($el)
+        }
+
+        if ($last !== $first) {
+            if ($last.nodeName.toLowerCase() === 'ul' || $last.nodeName.toLowerCase() === 'ol') {
+                ret.push([$last, $tmp])
+            } else {
+                ret.push($last)
+            }
+        }
+
+        return ret
+    }
+
+    // 将old element的子元素全部移到new element下
+    function transfer($oel, $nel) {
+        var $child,
+            $tmp
+
+        for ($child = $oel.firstChild; $child !== $oel.lastChild;) {
+            $tmp = $child.nextSibling
+            $nel.appendChild($child)
+            $child = $tmp
+        }
+        if ($child) {
+            $nel.appendChild($child)
+        }
+    }
+
+    // 将选中的区域变成一个list
+    // this should be editor
+    function mergeToList(sel, range, btn) {
+        var $list,
+            $el,
+            $first,
+            $li,
+            $elements = getRangeElements.call(this, range),
+            tag = btn.tag,
+            emptyList = true,
+            name;
+
+        if($elements === []) {
+            console.log('range return empty array, something wrong')
+            return
+        }
+
+        $first = $elements[0]
+        $list = document.createElement(tag)
+        if (isArray($first)) {
+            // ul or ol
+            breakList($first[0], $list, $first[1], false)
+            emptyList = false
+            this.$body.insertBefore($list, $first[0].nextSibling)
+        } else {
+            name = $first.nodeName.toLowerCase()
+            if (name === 'p') {
+                $li = document.createElement('li')
+                transfer($first, $li)
+                $list.appendChild($li)
+                emptyList = false
+                this.$body.insertBefore($list, $first.nextSibling)
+                this.$body.removeChild($first)
+            }
+        }
+
+        for (var i = 1; i < $elements.length; i ++) {
+            $el = $elements[i]
+
+            if (i === $elements.length - 1) {
+                if (isArray($el)) {
+                    // 最后一个
+                    breakList($el[0], $list, $el[1], true)
+                    this.$body.insertBefore($list, $el[0])
+                } else {
+                    name = $el.nodeName.toLowerCase()
+                    if (name === 'p') {
+                        $li = document.createElement('li')
+                        transfer($el, $li)
+                        $list.appendChild($li)
+                    } else {
+                        // 不对这些元素做任何处理, $list完成
+                    }
+                    if(emptyList === true) {
+                        this.$body.insertBefore($list, $el)
+                    }
+                    this.$body.removeChild($el)
+                }
+            } else {
+                name = $el.nodeName.toLowerCase()
+                if (name === 'p' || name === 'ul' || name === 'ol') {
+                    $li = document.createElement('li')
+                    transfer($el, $li)
+                    $list.appendChild($li)
+                    if (emptyList === true) {
+                        this.$body.insertBefore($list, $el.nextSibling)
+                        emptyList = false
+                    }
+                    this.$body.removeChild($el)
+                } else {
+                    if (emptyList === false) {
+                        $list = document.createElement(tag)
+                        emptyList = true
+                    }
+                }
+            }
+        }
+    }
+    // this should be ol or ul
+    function execList() {
+
+    }
+    var OlButton = Button.extend(Button(), {
+        name: 'ol',
+        icon: 'fa fa-list-ol',
+        title: '有序列表',
+        tag: 'ol',
+        typ: 'custom',
+        exec: function() {
+            execList.call(this)
+        }
+    })
+    var UlButton = Button.extend(Button(), {
+        name: 'ul',
+        icon: 'fa fa-ul',
+        title: '无序列表',
+        tag: 'ul',
+        typ: 'custom',
+        exec: function() {
+            execList.call(this)
+        }
+    })
+    var TableButton = Button.extend(Button(), {
+        name: 'table',
+        icon: 'fa fa-table',
+        title: '插入表格',
+        tag: 'table',
+        typ: 'menu',
+        exec: function() {
+            execList.call(this)
+        }
+    })
+    console.log('table button:', TableButton.prototype)
+    TableButton.prototype.renderMenu = function() {
+        var $menuDiv = document.createElement('div')
+        $menuDiv.setAttribute('class', "toolbar-menu toolbar-menu-table")
+        $menuDiv.innerHTML ='<div class="menu-create-table" style="display: block;">' +
+            '<table><tbody>' +
+            '<tr><td data-param="1,1"></td><td data-param="1,2"></td><td data-param="1,3"></td><td data-param="1,4"></td><td data-param="1,5"></td><td data-param="1,6"></td></tr>' +
+            '<tr><td data-param="2,1"></td><td data-param="2,2"></td><td data-param="2,3"></td><td data-param="2,4"></td><td data-param="2,5"></td><td data-param="2,6"></td></tr>' +
+            '<tr><td data-param="3,1"></td><td data-param="3,2"></td><td data-param="3,3"></td><td data-param="3,4"></td><td data-param="3,5"></td><td data-param="3,6"></td></tr>' +
+            '<tr><td data-param="4,1"></td><td data-param="4,2"></td><td data-param="4,3"></td><td data-param="4,4"></td><td data-param="4,5"></td><td data-param="4,6"></td></tr>' +
+            '<tr><td data-param="5,1"></td><td data-param="5,2"></td><td data-param="5,3"></td><td data-param="5,4"></td><td data-param="5,5"></td><td data-param="5,6"></td></tr>' +
+            '<tr><td data-param="6,1"></td><td data-param="6,2"></td><td data-param="6,3"></td><td data-param="6,4"></td><td data-param="6,5"></td><td data-param="6,6"></td></tr>' +
+            '</tbody></table></div>' +
+            '<div class="menu-edit-table" style="display: none;">' +
+            '<ul><li><a tabindex="-1" unselectable="on" class="menu-item" href="javascript:;" data-param="deleteRow"><span>删除行</span></a></li>' +
+            '<li><a tabindex="-1" unselectable="on" class="menu-item" href="javascript:;" data-param="insertRowAbove"><span>在上面插入行</span></a></li>' +
+            '<li><a tabindex="-1" unselectable="on" class="menu-item" href="javascript:;" data-param="insertRowBelow"><span>在下面插入行</span></a></li>' +
+            '<li><span class="separator"></span></li>' +
+            '<li><a tabindex="-1" unselectable="on" class="menu-item" href="javascript:;" data-param="deleteCol"><span>删除列</span></a></li>' +
+            '<li><a tabindex="-1" unselectable="on" class="menu-item" href="javascript:;" data-param="insertColLeft"><span>在左边插入列</span></a></li>' +
+            '<li><a tabindex="-1" unselectable="on" class="menu-item" href="javascript:;" data-param="insertColRight"><span>在右边插入列</span></a></li>' +
+            '<li><span class="separator"></span></li>' +
+            '<li><a tabindex="-1" unselectable="on" class="menu-item" href="javascript:;" data-param="deleteTable"><span>删除表格</span></a></li>' +
+            '</ul></div>',
+        this.$el.appendChild($menuDiv)
+
+        var $div = this.$el.querySelector(".menu-create-table"),
+            $tr = $div.firstChild.firstChild.firstChild,
+            self = this
+        this.$createMenu = []
+        for (; $tr; $tr = $tr.nextSibling) {
+            var $trs = []
+            for (var $td = $tr.firstChild; $td; $td = $td.nextSibling) {
+                $td.addEventListener('mouseover', function(event) {
+                    self.createMenus.hover.call(self, event)
+                } )
+                $td.addEventListener('click', function(event){
+                    self.createMenus.click.call(self, event, vm)
+                })
+
+                $trs.push($td)
+            }
+            this.$createMenu.push($trs)
+        }
+        console.log(this.$createMenu)
+    }
+    console.log('table button:', TableButton.prototype)
+    TableButton.prototype.execMenuCmd = function(event, cmd) {
+
+    }
   // popover
   var PopOver = function() {
 
@@ -345,14 +846,13 @@
 
     // the cursor point element
     this.$currentEl = null
-    console.log(this.$editor, typeof selector)
     this.init()
 
     _editors.push(this)
   }
 
   JustEditor.prototype = {
-    init: function() {
+    init: function(content) {
         // create editor's element
         this.$toolbar = document.createElement('div')
         this.$toolbar.setAttribute('class', 'je-toolbar')
@@ -364,12 +864,18 @@
         this.$body.setAttribute('contenteditable', true)
         this.$body.setAttribute('class', 'je-body')
 
-        console.log(this.$editor)
         this.$editor.appendChild(this.$toolbar)
         this.$editor.appendChild(this.$body)
 
+        this._browser = browser
+
         this.buildToolbar()
         this.bindEvents()
+        this.$body.focus()
+
+        if (!content) {
+            this._browser.createEmptyP(this.$body)
+        }
     },
     buildToolbar: function() {
         var name, $toolbar, btn;
@@ -387,7 +893,7 @@
                     continue
                 }
                 btn = new buttons[name]
-                btn.init()
+                btn.init(this)
                 this.$menuUl.appendChild(btn.$el)
             }
 
@@ -405,6 +911,14 @@
                     this.$body.addEventListener(name, this[eh])
                 }
             }
+        }
+
+        this.on('statusChange', this.updateStatus, this)
+    },
+    updateStatus: function(eventName) {
+        console.log("updateStatus:", eventName)
+        for (var i = 0; i < this.$buttons.length; i ++) {
+            this.$buttons[i].updateStatus(eventName)
         }
     },
     onBlur: function(event) {
@@ -429,17 +943,20 @@
         console.log('onKeyup')
     }
   }
+    // inherits event
+    _extend(Event, JustEditor.prototype)
 
   this.JustEditor = JustEditor
 
   // hide all menus
-  this.addEventListener('click', function() {
+  document.addEventListener('click', function() {
       var e, $menu;
       for (var i = 0; i < _editors.length; i ++) {
           e = _editors[i]
           for (var j = 0; j < e.$menuButtons.length; j ++) {
+              console.log("document onclick")
               $menu = e.$menuButtons[j]
-              //$menu.$el.classList.remove('menu-on')
+              $menu.$el.classList.remove('menu-on')
           }
       }
   })
