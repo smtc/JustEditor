@@ -97,9 +97,10 @@
     }
   }
 
-  function _extend(source, obj) {
+  function _extend(source, obj, notReplace) {
     for (var prop in source) {
-          obj[prop] = source[prop]
+        if ((!notReplace) || (notReplace === true && !obj[prop]))
+            obj[prop] = source[prop]
     }
     return obj
   }
@@ -271,7 +272,7 @@
     onclick: function(event) {
         if (this.typ === 'menu') {
             var $el = this.liClicked(event)
-            if ($el === this.$li) {
+            if ($el === this.$el) {
                 this.$el.classList.toggle('menu-on')
             } else {
                 // hide menu
@@ -771,6 +772,64 @@
         typ: 'menu',
         exec: function() {
             execList.call(this)
+        },
+        tdHover: function(event) {
+            var $target = event.currentTarget,
+                param = $target.getAttribute("data-param")
+                ,cols, rows;
+
+            if (!param) {
+                return
+            }
+            cols = parseInt(param.split(',')[1])
+            rows = parseInt(param.split(',')[0])
+
+            for(var i = 0; i < 6; i ++) {
+                for( var j = 0; j < 6; j ++) {
+                    if(i < rows && j < cols) {
+                        this.$createMenu[i][j].classList.add("selected")
+                    } else {
+                        this.$createMenu[i][j].classList.remove("selected")
+                    }
+                }
+            }
+        },
+        tdClick: function(event) {
+            console.log('click on create table menu')
+            var sel = window.getSelection(),
+                range = sel.getRangeAt(0),
+                $target = event.currentTarget,
+                param = $target.getAttribute("data-param"),
+                vm = this.editor,
+                cols, rows;
+
+            if (!range || !param) {
+                console.log('range or param is nil')
+                return
+            }
+            if (!vm.$currentEl) {
+                console.log('current element is null')
+                return
+            }
+            var $table = document.createElement('table')
+
+            cols = parseInt(param.split(',')[1])
+            rows = parseInt(param.split(',')[0])
+
+            var $tbody = document.createElement('tbdoy'),
+                $tr,
+                $td
+            for(var i = 0; i < rows; i ++) {
+                $tr = document.createElement('tr')
+                for (var j = 0; j < cols; j++) {
+                    $td = document.createElement('td')
+                    $tr.appendChild($td)
+                }
+                $tbody.appendChild($tr)
+            }
+            $table.appendChild($tbody)
+            console.log(vm.$currentEl.nextSibling)
+            vm.$body.insertBefore($table, vm.$currentEl.nextSibling)
         }
     })
     console.log('table button:', TableButton.prototype)
@@ -807,10 +866,10 @@
             var $trs = []
             for (var $td = $tr.firstChild; $td; $td = $td.nextSibling) {
                 $td.addEventListener('mouseover', function(event) {
-                    self.createMenus.hover.call(self, event)
+                    self.tdHover.call(self, event)
                 } )
                 $td.addEventListener('click', function(event){
-                    self.createMenus.click.call(self, event, vm)
+                    self.tdClick.call(self, event)
                 })
 
                 $trs.push($td)
@@ -819,10 +878,7 @@
         }
         console.log(this.$createMenu)
     }
-    console.log('table button:', TableButton.prototype)
-    TableButton.prototype.execMenuCmd = function(event, cmd) {
 
-    }
   // popover
   var PopOver = function() {
 
@@ -840,7 +896,7 @@
   var JustEditor = function(selector, options) {
     this.$buttons = []
     this.$menuButtons = []
-    this.options = _extend(defaultOptions, options || {})
+    this.options = _extend(defaultOptions, options || {}, true)
 
     this.$editor = typeof selector === 'string' ? document.getElementById(selector) : selector
 
@@ -852,6 +908,8 @@
   }
 
   JustEditor.prototype = {
+      upShortCuts: {},
+      downShortCuts: {},
     init: function(content) {
         // create editor's element
         this.$toolbar = document.createElement('div')
@@ -874,7 +932,10 @@
         this.$body.focus()
 
         if (!content) {
-            this._browser.createEmptyP(this.$body)
+            this.$currentEl = this._browser.createEmptyP(this.$body)
+        } else {
+            this.$body.innerHTML = content
+            this.$currentEl = this.$body.firstChild
         }
     },
     buildToolbar: function() {
@@ -904,11 +965,51 @@
         }
     },
     bindEvents: function() {
+        var keymap = {
+            'backspace': 8,
+            'enter': 13,
+            'del': 46,
+
+            'insert': 45,
+            'left': 37,
+            'up': 38,
+            'right': 39,
+            'down': 40,
+            'pageup': 33,
+            'pagedown': 34,
+            'home': 36,
+            'end': 35
+            },
+            method,
+            code
         for (var eh in this) {
             if (typeof this[eh] === 'function') {
-                if (/^on*/.test(eh)) {
-                    var name = eh.replace(/^on/, '').toLowerCase()
-                    this.$body.addEventListener(name, this[eh])
+                /*if (/^on.+/.test(eh)) {
+                    var name = eh.replace(/^on/, '').toLowerCase(),
+                        self = this,
+                        fn = self[eh]
+                    console.log(eh, name)
+                    this.$body.addEventListener(name, function(event) {
+                        console.log(name, eh, "fn=", fn, fn.name)
+                        fn.call(self, event)
+                    }.bind(this, event))
+                } else */
+                if (/^key*/.test(eh)) {
+                    if (/^keydown*/.test(eh)) {
+                        method = 'down'
+                        code = eh.replace(/^keydown/, '').toLowerCase()
+                    } else if (/^keyup*/.test(eh)) {
+                        method = 'up'
+                        code = eh.replace(/^keyup/, '').toLowerCase()
+                    } else {
+                        console.log('method begin with key but neither keydown or keyup: ' + eh)
+                        continue
+                    }
+                    if (keymap[code]) {
+                        this.registerShortCut(method, keymap[code], this[eh])
+                    } else {
+                        console.log("Not found key in keymap:", code)
+                    }
                 }
             }
         }
@@ -938,10 +1039,31 @@
     },
     onKeydown: function(event) {
         console.log('onKeydown')
+        if (this.downShortCuts[event.which]) {
+            this.downShortCuts[event.which].call(this, event)
+        }
     },
     onKeyup: function(event) {
-        console.log('onKeyup')
-    }
+        console.log('onKeyup', this, this.upShortCuts)
+        if (this.upShortCuts[event.which]) {
+            this.upShortCuts[event.which].call(this, event)
+        }
+    },
+      keydownEnter: function(event) {
+        console.log("key down enter")
+      },
+      keyupDel: function(event) {
+
+      },
+      keyBackspace: function(event) {
+
+      },
+      registerShortCut: function(method, key, handler) {
+          var shortCuts = method === 'up' ? this.upShortCuts : this.downShortCuts
+          if (!shortCuts[key]) {
+              shortCuts[key] = handler
+          }
+      }
   }
     // inherits event
     _extend(Event, JustEditor.prototype)
@@ -953,8 +1075,8 @@
       var e, $menu;
       for (var i = 0; i < _editors.length; i ++) {
           e = _editors[i]
+          console.log("document onclick")
           for (var j = 0; j < e.$menuButtons.length; j ++) {
-              console.log("document onclick")
               $menu = e.$menuButtons[j]
               $menu.$el.classList.remove('menu-on')
           }
