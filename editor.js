@@ -131,6 +131,240 @@
     return child;
   }
 
+    // 将old element变成new tag, 返回new element
+    function transformTo($oel, nTag, range) {
+        var $child,
+            $tmp,
+            $parent = $oel.parentNode,
+            $nel = document.createElement(nTag)
+
+        console.log($parent, $oel, $oel.parentNode)
+        for ($child = $oel.firstChild; $child !== $oel.lastChild;) {
+            $tmp = $child.nextSibling
+            $nel.appendChild($child)
+            $child = $tmp
+        }
+        if ($child) {
+            $nel.appendChild($child)
+        }
+
+        if (range) {
+            console.log('transformTo will modify range ........', range._start, range._end);
+            (range._start === $oel) && (range._start = $nel);
+            (range._end === $oel) && (range._end = $nel);
+        }
+        $parent.insertBefore($nel, $oel)
+        $parent.removeChild($oel)
+        return $nel
+    }
+    // $s: start element
+    // $e: end element
+    // $c: the final container element: $body
+    // fn: filter function
+    // cond: complete condition
+    var travelUp = function($s, $e, $c, fn, cond) {
+        var $p;
+
+        console.log('travelUp: ', $s, $e, $s===$e, $s.nodeType)
+        for($p = $s.parentNode; $s !== $e && $s !== $c;) {
+            if (fn($s, $p) === cond) {
+                console.log('  travel match at:', $s, $p, cond)
+                return cond
+            }
+            $s = $p, $p = $p.parentNode
+        }
+
+        console.log('  travel default:', !cond)
+        return !cond
+    }
+  var Range = function(editor) {
+      this.sel = window.getSelection ? window.getSelection() : document.getSelection()
+      this.range = (this.sel && this.sel.rangeCount) ? this.sel.getRangeAt(0) : null
+      this.editor = editor
+  }
+  Range.prototype = {
+      rangeAtEnd: function(editor) {
+          if ((!this.range) || (!this.range.collapsed)) {
+              return false
+          }
+          var self = this
+          return travelUp(self.range.endContainer, editor.$currentEl.parentNode, editor.$body, function($s, $p) {
+              if ($p) {
+                  if ($s !== $p.lastChild) {
+                      console.log('not last child: ', $s)
+                      return false
+                  }
+              }
+              if ($s.nodeType === 3) {
+                  if ($s.length !== self.range.endOffset) {
+                      console.log('not at text end: ', $s)
+                      return false
+                  }
+              }
+              return true
+          }, false)
+      },
+      rangeAtStart: function(editor) {
+          if ((!this.range) || (!this.range.collapsed)) {
+              return false
+          }
+          var self = this
+          return travelUp(self.range.endContainer, editor.$currentEl.parentNode, editor.$body, function($s, $p) {
+              if ($p) {
+                  if($s !== $p.firstChild) {
+                      return false
+                  }
+              }
+              if ($s.nodeType === 3) {
+                  if (self.range.endOffset !== 0) {
+                      return false
+                  }
+              }
+              return true
+          }, false)
+      },
+    clear: function() {
+        var e;
+        try {
+            return this.sel.removeAllRanges();
+        } catch (_error) {
+            e = _error;
+        }
+    },
+      // root 应该是editor.$body.parentNode
+      getRangeAllNodes: function(root, filterFn) {
+          if (!this.range) return [];
+          if (this.range.collapsed) return [this.range.endContainer];
+
+          var start = this.range.startContainer,
+              end = this.range.endContainer,
+              result = [],
+              startLine = []
+
+          // 遍历parent节点, child右边的所有元素，深度优先
+          // return true will stop the travel iteration
+          function travelPartial(parent, child) {
+              if (child === end) {
+                  return true
+              }
+
+              if(child.hasChildNodes()) {
+                  if(travelPartial(child, child.firstChild) === true) {
+                      return true
+                  }
+              }
+
+              filterFn ? (filterFn(child) && result.push(child)) :  result.push(child);
+
+              var next = child.nextSibling
+              if (!next) {
+                  return
+              }
+
+              travelPartial(parent, next)
+          }
+
+          if(start.hasChildNodes()) {
+              travelPartial(start, start.firstChild)
+          }
+          filterFn ? (filterFn(child) && result.push(child)) :  result.push(child);
+          var child = start.nextSibling,
+              parent
+
+          for (var tmp = start.parentNode; tmp && tmp !== root && tmp !== end; tmp = tmp.parentNode) {
+              startLine.push(tmp)
+          }
+
+          for (var i = 0; i < startLine.length; i ++) {
+              parent = startLine[i]
+              while(child) {
+                  if(travelPartial(parent, child) === true) {
+                      return result
+                  }
+                  child = child.nextSibling
+              }
+              filterFn ? (filterFn(child) && result.push(child)) :  result.push(child);
+              child = parent.nextSibling
+          }
+
+          return result
+      },
+      getBodyChild: function($ele) {
+          var $body = this.editor.$body,
+              $p
+          for($p = $ele; $p.parentNode !== $body && $p.parentNode !== document.body; $p = $p.parentNode);
+          return $p.parentNode === $body ?  $p :  null
+      },
+      getBodyChildren: function() {
+          var start = this.getBodyChild(this.range.startContainer),
+              end = this.getBodyChild(this.range.endContainer)
+          if (start === end) return [start];
+          var children = []
+          for (var ele = start; ele !== end; ele = ele.nextSibling) {
+              children.push(ele)
+          }
+          children.push(end)
+          return children
+      },
+      getNodeP: function() {
+          if (!this.range) return [];
+          if (this.range.collapsed) {
+              return this.editor.$currentEl ? [ this.editor.$currentEl ] : []
+          }
+          var start = this.getBodyChild(this.range.startContainer),
+              end = this.getBodyChild(this.range.endContainer);
+          if (start === null || end === null ) {
+              throw "start or end is null";
+              return []
+          }
+          if (start === end) return [start];
+          var children = start.parentNode.childNodes;
+              var indexStart = _ap.indexOf.call(children, start),
+              indexEnd = _ap.indexOf.call(children, end)
+          if (indexStart === -1 || indexEnd === -1) {
+              throw "start or end is not child of editor body"
+          }
+          if (indexStart < indexEnd) {
+              var tmp = indexEnd
+              indexStart = tmp
+              indexEnd = indexStart
+          }
+          return _ap.slice.call(children, indexStart, indexEnd+1)
+      },
+      doCommand: function(nodetag, fn) {
+          var nodes;
+          if (nodetag === 'p') {
+              nodes = this.getNodeP()
+          } else if (nodetag === 'all') {
+              nodes = this.getRangeAllNodes(this.editor.$body.parentNode)
+          }
+          for (var i = 0; i < nodes.length; i++) {
+             fn(nodes[i])
+          }
+      },
+      save: function() {
+          if (!this.range) {
+              console.log("range.save: this.range is null!!!")
+              return
+          };
+          if (this._start) return;
+          this._start = this.range.startContainer
+          this._startOffset = this.range.startOffset
+          this._end = this.range.endContainer
+          this._endOffset = this.range.endOffset
+          return this
+      },
+      restore: function(or) {
+          var rg = or ? or : this
+          this.clear()
+          var range = document.createRange();
+          range.setStart(rg._start, rg._startOffset);
+          range.setEnd(rg._end, rg._endOffset);
+          this.sel.addRange(range);
+          return this
+      }
+  }
+
   var Event = {
     on: function(name, cb, ctx) {
       this.events || (this.events = {});
@@ -191,6 +425,7 @@
         this.status = arg.status || ''
         // on init, set the $button element
         this.$el = null
+        this.$a = null
         this.$exclueBtns = []
     }
     return btn
@@ -279,13 +514,17 @@
                 this.$el.classList.remove('menu-on')
                 // exec the command
                 var cmd = $el.getAttribute('data-param')
+                this.range = new Range(this.editor)
+                this.range.save()
                 this.execMenuCmd && this.execMenuCmd(event, cmd)
+                this.range.restore()
             }
         } else if (this.typ === 'basic') {
             this.command && document.execCommand(this.command, false)
         } else {
             this.exec(event)
         }
+        this.editor.$body.focus()
         this.editor.fire('statusChange')
         event.preventDefault()
         event.stopPropagation()
@@ -361,7 +600,56 @@
   })
 
   TextButton.prototype.execMenuCmd = function(event, cmd) {
+    console.log('execMenuCmd: ', cmd)
+      var range = this.range
+      range.doCommand('p', function($el) {
+        console.log('text button docommand:', $el, cmd)
+        var tag = $el.nodeName
+          if (tag === cmd) return;
+          transformTo($el, cmd, range)
+      })
+      this.updateStatus()
+  }
 
+  TextButton.prototype.setActive = function(cls) {
+      if (cls === '') {
+          this.$a.classList.remove('active')
+          this.$a.classList.remove('active-h1')
+          this.$a.classList.remove('active-h2')
+          this.$a.classList.remove('active-h3')
+          return
+      }
+      this.$a.classList.add('active')
+      if (cls === 'h1') {
+          this.$a.classList.remove('active-h2')
+          this.$a.classList.remove('active-h3')
+          this.$a.classList.add('active-h1')
+      } else if (cls === 'h2'){
+          this.$a.classList.remove('active-h1')
+          this.$a.classList.remove('active-h3')
+          this.$a.classList.add('active-h2')
+      } else if (cls === 'h3'){
+          this.$a.classList.remove('active-h1')
+          this.$a.classList.remove('active-h2')
+          this.$a.classList.add('active-h3')
+      }
+  }
+  TextButton.prototype.updateStatus = function(event) {
+      var editor = this.editor,
+          tagName
+      if (!editor.$currentEl) return;
+      tagName = editor.$currentEl.nodeName.toLowerCase()
+      console.log('text button update status: ',editor.$currentEl, tagName)
+
+      if (tagName === 'h1') {
+          this.setActive('h1')
+      } else if (tagName === 'h2') {
+          this.setActive('h2')
+      } else if (tagName === 'h3') {
+          this.setActive('h3')
+      } else {
+          this.setActive('')
+      }
   }
     // bold button
     var BoldButton = Button.extend(Button(), {
@@ -902,6 +1190,8 @@
 
     // the cursor point element
     this.$currentEl = null
+    this.saved = []
+    this.savedIndex = 0
     this.init()
 
     _editors.push(this)
@@ -984,17 +1274,14 @@
             code
         for (var eh in this) {
             if (typeof this[eh] === 'function') {
-                /*if (/^on.+/.test(eh)) {
+                if (/^on.+/.test(eh)) {
                     var name = eh.replace(/^on/, '').toLowerCase(),
-                        self = this,
-                        fn = self[eh]
-                    console.log(eh, name)
-                    this.$body.addEventListener(name, function(event) {
-                        console.log(name, eh, "fn=", fn, fn.name)
-                        fn.call(self, event)
-                    }.bind(this, event))
-                } else */
-                if (/^key*/.test(eh)) {
+                        self = this;
+                    this.$body.addEventListener(name, (function() {
+                        var fn = self[eh]
+                        return function(event) { fn.call(self, event) }
+                    })())
+                } else if (/^key*/.test(eh)) {
                     if (/^keydown*/.test(eh)) {
                         method = 'down'
                         code = eh.replace(/^keydown/, '').toLowerCase()
@@ -1023,28 +1310,36 @@
         }
     },
     onBlur: function(event) {
-        console.log('onBlur')
+        //console.log('onBlur')
     },
     onFocus: function(event) {
-        console.log('onFocus')
+        //console.log('onFocus')
     },
     onClick: function(event) {
-        console.log('onClick')
+        //console.log('onClick')
     },
     onMouseDown: function(event) {
-        console.log('onMouseDown')
+        //console.log('onMouseDown')
     },
     onMouseUp: function(event) {
-        console.log('onMouseUp')
+        //console.log('onMouseUp')
+        var range = new Range(this)
+
+        if (this.$body.innerHTML.trim() === '') {
+            this._browser.createEmptyP(this.$body)
+        }
+        this.cursorPos()
+        // 更新toolbar status
+        this.updateStatus(event, range)
     },
     onKeydown: function(event) {
-        console.log('onKeydown')
+        //console.log('onKeydown')
         if (this.downShortCuts[event.which]) {
             this.downShortCuts[event.which].call(this, event)
         }
     },
     onKeyup: function(event) {
-        console.log('onKeyup', this, this.upShortCuts)
+        //console.log('onKeyup', event, event.which, this.upShortCuts)
         if (this.upShortCuts[event.which]) {
             this.upShortCuts[event.which].call(this, event)
         }
@@ -1063,6 +1358,49 @@
           if (!shortCuts[key]) {
               shortCuts[key] = handler
           }
+      },
+      // 获得输入光标的当前位置
+      cursorPos: function(event) {
+          var sel = window.getSelection(),
+              range = sel.getRangeAt(0),
+              $el = range.startContainer,
+              $parent;
+
+          $parent = $el.parentNode
+          while ($parent !== this.$body && $el !== this.$body) {
+              console.log('cursor pos travel:', $el, 'parent:', $parent)
+              $el = $parent
+              $parent = $parent.parentNode
+          }
+          console.log('cursor pos:', $el)
+          this.$currentEl = $el
+      },
+      setCurrentEl: function($ele) {
+          this.$currentEl = $ele
+      },
+      undo: function() {
+          if (this.savedIndex <= 0) return
+          this.savedIndex --
+          this.$body.innerHTML = this.saved[this.savedIndex].html
+          var range = new Range(this)
+          range.restore(this.saved[this.savedIndex].range)
+      },
+      redo: function() {
+          if (this.savedIndex >= this.saved.length) return;
+          this.savedIndex ++
+          this.$body.innerHTML = this.saved[this.savedIndex].html
+          var range = new Range(this)
+          range.restore(this.saved[this.savedIndex].range)
+      },
+      //.保存innerHTML和range
+      saveDone: function() {
+          var range = new Range(this)
+          range.save()
+          this.saved.push( {
+            html: this.$body.innerHTML,
+            range: range
+          })
+          this.savedIndex ++
       }
   }
     // inherits event
