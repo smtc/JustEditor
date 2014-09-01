@@ -332,14 +332,16 @@
           return _ap.slice.call(children, indexStart, indexEnd+1)
       },
       doCommand: function(nodetag, fn) {
-          var nodes;
+          var nodes,
+              nd;
           if (nodetag === 'p') {
               nodes = this.getNodeP()
           } else if (nodetag === 'all') {
               nodes = this.getRangeAllNodes(this.editor.$body.parentNode)
           }
           for (var i = 0; i < nodes.length; i++) {
-             fn(nodes[i])
+             nd = nodes[i];
+             (nodetag === 'p' && this.editor.$currentEl === nd) ? (this.editor.$currentEl = fn(nd)) : fn(nd)
           }
       },
       save: function() {
@@ -520,6 +522,7 @@
                 this.range.restore()
             }
         } else if (this.typ === 'basic') {
+            console.log('exec command: ', this.command)
             this.command && document.execCommand(this.command, false)
         } else {
             this.exec(event)
@@ -549,28 +552,7 @@
       buttons.register(btn)
       return btn
   }
-    /*
-    // button's menu
-    var Menu = function() {
-        this.button = null
-    }
-    Menu.prototype = {
-        show: function(argument) {
-            // body...
-        },
-        hide: function() {
 
-        },
-        render: function() {
-
-        },
-        init: function(btn) {
-            this.button = btn
-        }
-    }
-    Menu.extend = extend
-    var TextMenu = Menu.extend()
-    */
   var TextButton = Button.extend(Button(), {
     name: 'title',
     title: '标题文字',
@@ -605,8 +587,8 @@
       range.doCommand('p', function($el) {
         console.log('text button docommand:', $el, cmd)
         var tag = $el.nodeName
-          if (tag === cmd) return;
-          transformTo($el, cmd, range)
+          if (tag === cmd) return $el;
+          return transformTo($el, cmd, range)
       })
       this.updateStatus()
   }
@@ -634,6 +616,7 @@
           this.$a.classList.add('active-h3')
       }
   }
+
   TextButton.prototype.updateStatus = function(event) {
       var editor = this.editor,
           tagName
@@ -666,7 +649,8 @@
         name: 'italic',
         icon: 'fa fa-italic',
         title: '斜体文字 ( Ctrl + i )',
-        tagName: 'i',
+        tag: 'i',
+        typ: 'basic',
         command: 'italic',
         menu: false,
         excludeButtons: []
@@ -676,7 +660,8 @@
         name: 'underline',
         icon: 'fa fa-underline',
         title: '下划线文字 ( Ctrl + u )',
-        tagName: 'u',
+        tag: 'u',
+        typ: 'basic',
         command: 'underline',
         menu: false,
         excludeButtons: []
@@ -687,6 +672,7 @@
         icon: 'fa fa-strikethrough',
         title: '下划线文字 ( Ctrl + u )',
         tag: 'strike',
+        typ: 'basic',
         command: 'strikethrough',
         menu: false,
         excludeButtons: []
@@ -935,21 +921,6 @@
         return ret
     }
 
-    // 将old element的子元素全部移到new element下
-    function transfer($oel, $nel) {
-        var $child,
-            $tmp
-
-        for ($child = $oel.firstChild; $child !== $oel.lastChild;) {
-            $tmp = $child.nextSibling
-            $nel.appendChild($child)
-            $child = $tmp
-        }
-        if ($child) {
-            $nel.appendChild($child)
-        }
-    }
-
     // 将选中的区域变成一个list
     // this should be editor
     function mergeToList(sel, range, btn) {
@@ -977,8 +948,7 @@
         } else {
             name = $first.nodeName.toLowerCase()
             if (name === 'p') {
-                $li = document.createElement('li')
-                transfer($first, $li)
+                $li = transformTo($first, 'li')
                 $list.appendChild($li)
                 emptyList = false
                 this.$body.insertBefore($list, $first.nextSibling)
@@ -997,8 +967,7 @@
                 } else {
                     name = $el.nodeName.toLowerCase()
                     if (name === 'p') {
-                        $li = document.createElement('li')
-                        transfer($el, $li)
+                        $li = transformTo($el, 'li')
                         $list.appendChild($li)
                     } else {
                         // 不对这些元素做任何处理, $list完成
@@ -1011,8 +980,7 @@
             } else {
                 name = $el.nodeName.toLowerCase()
                 if (name === 'p' || name === 'ul' || name === 'ol') {
-                    $li = document.createElement('li')
-                    transfer($el, $li)
+                    $li = transformTo($el, 'li')
                     $list.appendChild($li)
                     if (emptyList === true) {
                         this.$body.insertBefore($list, $el.nextSibling)
@@ -1044,7 +1012,7 @@
     })
     var UlButton = Button.extend(Button(), {
         name: 'ul',
-        icon: 'fa fa-ul',
+        icon: 'fa fa-list-ul',
         title: '无序列表',
         tag: 'ul',
         typ: 'custom',
@@ -1059,7 +1027,6 @@
         tag: 'table',
         typ: 'menu',
         exec: function() {
-            execList.call(this)
         },
         tdHover: function(event) {
             var $target = event.currentTarget,
