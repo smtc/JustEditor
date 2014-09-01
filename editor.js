@@ -162,7 +162,7 @@
     // $c: the final container element: $body
     // fn: filter function
     // cond: complete condition
-    var travelUp = function($s, $e, $c, fn, cond) {
+    function travelUp ($s, $e, $c, fn, cond) {
         var $p;
 
         console.log('travelUp: ', $s, $e, $s===$e, $s.nodeType)
@@ -176,6 +176,62 @@
 
         console.log('  travel default:', !cond)
         return !cond
+    }
+    // 将parent list中的子元素变成新的list，从startLi到endLi(包括startLi, 不包括endLi)
+    function convertLi($parent, $startLi, $endLi, ntag) {
+        var $list = document.createElement(ntag)
+            $leftList,
+            $tmpEle;
+
+        for (var $p = $startLi; $p && ($p != $endLi); ) {
+            $tmpEle = $p.nextSibling
+            if ($p.nodeName.toLowerCase() === 'ul' || $p.nodeName.toLowerCase() === 'ol') {
+                var child, tmpChild
+                for (child = $p.firstChild; child; ) {
+                    tmpChild = child.nextSibling
+                    $list.appendChild(child)
+                    child = tmpChild
+                }
+                // 删除空list
+                $parent.remove($p)
+            } else {
+                $list.appendChild($p)
+            }
+            $p = $tmpEle
+        }
+        if ($p) {
+            $leftList = document.createElement($parent.nodeName)
+            for(; $p; $p = $p.nextSibling) {
+                $leftList.appendChild($p)
+            }
+        }
+        $parent.parentNode.insertBefore($list, $parent.nextSibling)
+        if ($leftList) {
+            $parent.parentNode.insertBefore($leftList, $parent.nextSibling)
+        }
+    }
+    // 尝试将list与前面的元素和后面的元素合并
+    function _mergeList($first, $second) {
+        for (var $p = $second.firstChild; $p; $p = $p.nextSibling) {
+            $first.appendChild($p)
+        }
+        return $first
+    }
+    // 合并元素
+    // dir: 合并反向
+    //   "prev": 合并prev元素
+    //   "next": 合并next元素
+    //   "all" or undefined: 合并lnext，prev元素
+    function mergeList($list, dir) {
+        var tag = $list.nodeName
+        if (!dir) dir = "all";
+        if ($list.previousSibling && $list.previousSibling.nodeName === tag && (dir === 'all' || dir === 'prev')) {
+            $list = _mergeList($list.previousSibling, $list)
+        }
+        if ($list.nextSibling && $list.nextSibling.nodeName === tag && (dir === 'all' || dir === 'next')) {
+            _mergeList($list, $list.nextSibling)
+        }
+        return $list
     }
   var Range = function(editor) {
       this.sel = window.getSelection ? window.getSelection() : document.getSelection()
@@ -343,6 +399,136 @@
              nd = nodes[i];
              (nodetag === 'p' && this.editor.$currentEl === nd) ? (this.editor.$currentEl = fn(nd)) : fn(nd)
           }
+      },
+      // list
+      // 只有在collapsed的情况下，才处理list到p的变换
+      //
+      // 1 range 为collapsed的情况
+      // 2 range不为collapsed的情况：
+      //    从当前元素开始处理，直到该元素的同级元素处理完，向上处理，直到range的end元素及end branch元素
+      //
+      convertToList: function(ntag) {
+          var $startTop, $endTop,
+              $startLi, $endLi,
+              $startMg, $endMg,
+              $allLi;
+          if (!this.range) {
+              throw "range is null"
+              return
+          }
+          $startLi = this.editor.travelUntilTag(this.range.startContainer, 'li')
+          if (this.range.collapsed) {
+              // 只有一个元素的情况
+              if (!$startLi) {
+                  $startTop = this.editor.$currentEl
+                  this.editor.$currentEl = $startTop = transformTo($startTop, ntag)
+                  mergeList($startTop)
+              } else {
+                  var $parent = $startLi.parentNode
+                  if ($parent.nodeName.toLowerCase() === ntag) return;
+                  if ($parent === this.editor.$currentEl) {
+                      this.editor.$currentEl = convertLi($parent, $startLi, $startLi.nextSibling, ntag)
+                  } else {
+                      convertLi($parent, $startLi, $startLi.nextSibling, ntag)
+                  }
+              }
+              return
+          }
+              var $nList = document.createElement(ntag),
+                  $start = this.editor.travelUntilTags(this.range.startContainer, ['li', 'p']),
+                  $end = this.editor.travelUntilTags(this.range.endContainer, ['li', 'p']),
+                  $endBranch = [],
+                  tag,
+                  inList,
+                  liCount = 0,
+                  shouldMerge = false,
+                  closeList = false,
+                  $parentEle,
+                  $nextEle,
+                  $li,
+                  $el;
+
+              // 把end元素到end元素的所有父元素都加入数组中
+              for($el = $end; $el !== this.editor.$body; $el = $el.nextSibling) {
+                  $endBranch.push($el)
+              }
+              if( $start.previousSibling.nodeName.toLowerCase() === ntag) {
+                  shouldMerge = true;
+              }
+              $parentEle = $el.parentNode
+              for ($el = $start; $el && ($endBranch.indexOf($el) === -1); ) {
+                  // 查找下一个元素
+                  $nextEle = $el.nextSibling
+                  if (!$nextEle) {
+                      // list需要闭合
+                      closeList = true
+                      $nextEle = $el
+                      for (; ($nextEle.parentNode != this.editor.$body) && (!$nextEle.nextSibling); ) {
+                          $nextEle = $nextEle.parentNode
+                      }
+                      $nextEle = $nextEle.nextSibling
+                  }
+                  tag = $el.nodeName.toLowerCase()
+                  if (tag === 'li') {
+                      $nList.appendChild($el)
+                      liCount ++
+                      inList = true
+                  } else if (tag === 'p') {
+                      $li = transformTo($el, 'li')
+                      $nList.appendChild($li)
+                      liCount ++
+                  } else if (tag === 'ul' || tag === 'ol') {
+                      var child, tmpChild
+                      for ( var child = $el.firstChild; child; ) {
+                          tmpChild = child.nextSibling
+                          $nList.appendChild(child)
+                          liCount ++
+                          child = tmpChild
+                      }
+                  } else if (tag === 'blockquote') {
+                      // 将 $nList 插入到blockquote元素之前
+                      if (liCount) {
+                          $parent.insertBefore($nList, $el)
+                          if (shouldMerge) {
+                              mergeList($nList, 'prev')
+                              shouldMerge = false
+                          }
+                      }
+                      // 将引用里面的所有数据加入到一个独立的list中
+                      convertLi($el, $el.firstChild, null, ntag)
+                      // 新建一个list
+                      if (liCount) {
+                          $nList = document.createElement(ntag)
+                          liCount = 0
+                      }
+                  }
+
+                  // 如果list需要关闭的话
+                  if (closeList && liCount) {
+                      inList ? $parentEle.parentNode.insertBefore($nList, $parentEle.nextSibling) : $parentEle.insertBefore($nList, $nextEle)
+                      if (shouldMerge) {
+                          mergeList($nList, 'prev')
+                          shouldMerge = false
+                      }
+                      $nList = document.createElement(ntag)
+                      closeList = false
+                      liCount = 0
+                  }
+                  // 循环下一个元素或上层元素
+                  $el = $nextEle
+              }
+              // 剩余的element
+              if ($el) {
+                  var index = $endBranch.indexOf($el)
+                  if (index === -1) {
+                      throw "element NOT in end branch elements"
+                      return
+                  }
+                  for () {
+
+                  }
+              }
+
       },
       save: function() {
           if (!this.range) {
@@ -722,7 +908,7 @@
      *  list
      */
     // 将ul或ol下的li元素修改为ol或ul下的li元素, 将当前的ul或ol元素break为多个元素
-    // $body 为 $jeBody
+    // $body 为 $body
     // $list为当前的list元素: ul or ol
     // $li为当前的li元素
     // to为变成的tagName: ul or ol
@@ -998,7 +1184,12 @@
     }
     // this should be ol or ul
     function execList() {
+        var range = new Range(this.editor)
+        range.save()
+        range.doCommand('p', function($ele) {
 
+        })
+        range.restore()
     }
     var OlButton = Button.extend(Button(), {
         name: 'ol',
@@ -1270,6 +1461,31 @@
 
         this.on('statusChange', this.updateStatus, this)
     },
+     travelUntil: function($start, cb) {
+         while($start !== this.$body.parentNode) {
+             if (cb($start) === true)
+                return $start;
+             $start = $start.parentNode
+         }
+         return null
+    },
+      travelUntilTag: function($start, tag) {
+          return this.travelUntil($start, function($el) {
+              if ($el.nodeName.toLowerCase() === tag) return true
+          })
+      },
+      travelUntilTags: function($start, tagArray) {
+          return this.travelUntil($start, function($el) {
+              var tag = $el.nodeName.toLowerCase()
+              if (tagArray.indexOf(tag) !== -1) return true
+          })
+      },
+      travelUntilTop: function($start) {
+          var self = this;
+          return this.travelUntil($start, function($el) {
+              if ($el.parentNode === self.$body) return true
+          })
+      },
     updateStatus: function(eventName) {
         console.log("updateStatus:", eventName)
         for (var i = 0; i < this.$buttons.length; i ++) {
