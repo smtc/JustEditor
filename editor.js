@@ -131,6 +131,9 @@
     return child;
   }
 
+    function nodename($el) {
+        return $el.nodeName.toLowerCase()
+    }
     // 将old element变成new tag, 返回new element
     function transformTo($oel, nTag, range) {
         var $child,
@@ -237,6 +240,7 @@
       this.sel = window.getSelection ? window.getSelection() : document.getSelection()
       this.range = (this.sel && this.sel.rangeCount) ? this.sel.getRangeAt(0) : null
       this.editor = editor
+      this.range !== null ? this.collapsed = this.range.collapsed : undefined
   }
   Range.prototype = {
       rangeAtEnd: function(editor) {
@@ -401,134 +405,29 @@
           }
       },
       // list
-      // 只有在collapsed的情况下，才处理list到p的变换
+      // 只有开始元素与结束元素的父节点相同时，才做进一步的处理
       //
-      // 1 range 为collapsed的情况
-      // 2 range不为collapsed的情况：
+      // 1 range不为collapsed的情况：
       //    从当前元素开始处理，直到该元素的同级元素处理完，向上处理，直到range的end元素及end branch元素
       //
       convertToList: function(ntag) {
-          var $startTop, $endTop,
-              $startLi, $endLi,
-              $startMg, $endMg,
-              $allLi;
-          if (!this.range) {
-              throw "range is null"
-              return
+      },
+      // 将blockquote的子元素元素变为list
+      convertQuoteToList: function($quote, ntag) {
+          var $nList = document.createElement(ntag)
+          // quote下的元素为已经是ntag，且只有这一个元素，移除该list
+          if (nodename($quote.firstChild) === ntag && $quote.firstChild === $quote.lastChild) {
+              var $list = $quote.firstChild,
+                  $el,
+                  $next
+              for ($el = $list.firstChild; $el; ) {
+                  $next = $el.nextSibling
+                  $nList.appendChild($el)
+                  $el = $next
+              }
+              $quote.removeChild($quote.firstChild)
+              $quote.appendChild($nList)
           }
-          $startLi = this.editor.travelUntilTag(this.range.startContainer, 'li')
-          if (this.range.collapsed) {
-              // 只有一个元素的情况
-              if (!$startLi) {
-                  $startTop = this.editor.$currentEl
-                  this.editor.$currentEl = $startTop = transformTo($startTop, ntag)
-                  mergeList($startTop)
-              } else {
-                  var $parent = $startLi.parentNode
-                  if ($parent.nodeName.toLowerCase() === ntag) return;
-                  if ($parent === this.editor.$currentEl) {
-                      this.editor.$currentEl = convertLi($parent, $startLi, $startLi.nextSibling, ntag)
-                  } else {
-                      convertLi($parent, $startLi, $startLi.nextSibling, ntag)
-                  }
-              }
-              return
-          }
-              var $nList = document.createElement(ntag),
-                  $start = this.editor.travelUntilTags(this.range.startContainer, ['li', 'p']),
-                  $end = this.editor.travelUntilTags(this.range.endContainer, ['li', 'p']),
-                  $endBranch = [],
-                  tag,
-                  inList,
-                  liCount = 0,
-                  shouldMerge = false,
-                  closeList = false,
-                  $parentEle,
-                  $nextEle,
-                  $li,
-                  $el;
-
-              // 把end元素到end元素的所有父元素都加入数组中
-              for($el = $end; $el !== this.editor.$body; $el = $el.nextSibling) {
-                  $endBranch.push($el)
-              }
-              if( $start.previousSibling.nodeName.toLowerCase() === ntag) {
-                  shouldMerge = true;
-              }
-              $parentEle = $el.parentNode
-              for ($el = $start; $el && ($endBranch.indexOf($el) === -1); ) {
-                  // 查找下一个元素
-                  $nextEle = $el.nextSibling
-                  if (!$nextEle) {
-                      // list需要闭合
-                      closeList = true
-                      $nextEle = $el
-                      for (; ($nextEle.parentNode != this.editor.$body) && (!$nextEle.nextSibling); ) {
-                          $nextEle = $nextEle.parentNode
-                      }
-                      $nextEle = $nextEle.nextSibling
-                  }
-                  tag = $el.nodeName.toLowerCase()
-                  if (tag === 'li') {
-                      $nList.appendChild($el)
-                      liCount ++
-                      inList = true
-                  } else if (tag === 'p') {
-                      $li = transformTo($el, 'li')
-                      $nList.appendChild($li)
-                      liCount ++
-                  } else if (tag === 'ul' || tag === 'ol') {
-                      var child, tmpChild
-                      for ( var child = $el.firstChild; child; ) {
-                          tmpChild = child.nextSibling
-                          $nList.appendChild(child)
-                          liCount ++
-                          child = tmpChild
-                      }
-                  } else if (tag === 'blockquote') {
-                      // 将 $nList 插入到blockquote元素之前
-                      if (liCount) {
-                          $parent.insertBefore($nList, $el)
-                          if (shouldMerge) {
-                              mergeList($nList, 'prev')
-                              shouldMerge = false
-                          }
-                      }
-                      // 将引用里面的所有数据加入到一个独立的list中
-                      convertLi($el, $el.firstChild, null, ntag)
-                      // 新建一个list
-                      if (liCount) {
-                          $nList = document.createElement(ntag)
-                          liCount = 0
-                      }
-                  }
-
-                  // 如果list需要关闭的话
-                  if (closeList && liCount) {
-                      inList ? $parentEle.parentNode.insertBefore($nList, $parentEle.nextSibling) : $parentEle.insertBefore($nList, $nextEle)
-                      if (shouldMerge) {
-                          mergeList($nList, 'prev')
-                          shouldMerge = false
-                      }
-                      $nList = document.createElement(ntag)
-                      closeList = false
-                      liCount = 0
-                  }
-                  // 循环下一个元素或上层元素
-                  $el = $nextEle
-              }
-              // 剩余的element
-              if ($el) {
-                  var index = $endBranch.indexOf($el)
-                  if (index === -1) {
-                      throw "element NOT in end branch elements"
-                      return
-                  }
-                  for () {
-
-                  }
-              }
-
       },
       save: function() {
           if (!this.range) {
@@ -875,7 +774,7 @@
                 return
             }
             var $hr = document.createElement('hr')
-            editor.$body.insertBefore($hr, this.$currentEl.nextSibling)
+            editor.$body.insertBefore($hr, editor.$currentEl.nextSibling)
 
             editor.$body.focus()}
     })
@@ -886,6 +785,57 @@
         tag: 'indent',
         typ: 'custom',
         exec: function() {
+            var $el, $start, $end,
+                tag,
+                indent,
+                range = new Range(this.editor)
+            if (!range.range) return;
+            $start = this.editor.travelUntilTop(range.range, 0)
+            $end = this.editor.travelUntilTop(range.range, 1)
+            for ($el = $start; $el !== $end.nextSibling; $el = $el.nextSibling) {
+                tag = nodename($el)
+                if (tag === 'p') {
+                    indent = $el.getAttribute("data-indent")
+                    if (indent === 0 || indent === '0' || !indent) {
+                        $el.setAttribute('data-indent', 1)
+                    } else {
+                        $el.setAttribute('data-indent', (+indent) + 1)
+                    }
+                } else if (tag === 'ul' || tag === 'ol') {
+                    var $startLi,
+                        $endLi,
+                        $parentList,
+                        tag,
+                        $nList,
+                        $el,
+                        $next,
+                        $last;
+
+                    $startLi = this.editor.travelUntilTag(range.range.startContainer, 'li')
+                    $endLi = this.editor.travelUntilTag(range.range.endContainer, 'li')
+                    // 简化操作，只有当开始节点月结束节点的父节点相同时，才处理
+                    if ($startLi.parentNode !== $endLi.parentNode) {
+                        return
+                    }
+                    $parentList = $startLi.parentNode
+                    if ($startLi === $parentList.firstChild) {
+                        // 第一个元素
+                        return
+                    }
+                    // 保存光标
+                    tag = nodename($parentList)
+                    $nList = document.createElement(tag)
+                    range.save()
+                    for ($el = $startLi, $last = $endLi.nextSibling; $el !== $last; ) {
+                        $next = $el.nextSibling
+                        $nList.appendChild($el)
+                        $el = $next
+                    }
+                    $parentList.insertBefore($nList, $last)
+                    // 恢复光标
+                    range.restore()
+                }
+            }
         }
     })
     Button.extend(Button(), {
@@ -894,19 +844,83 @@
         title: '向左缩进 ( Shift + Tab ) ',
         tag: 'outdent',
         typ: 'custom',
-        exec: function() {}
+        exec: function() {
+            var $el, $start, $end,
+                tag,
+                indent,
+                range = new Range(this.editor)
+            if (!range.range) return;
+            $start = this.editor.travelUntilTop(range.range, 0)
+            $end = this.editor.travelUntilTop(range.range, 1)
+            for ($el = $start; $el !== $end.nextSibling; $el = $el.nextSibling) {
+                tag = nodename($el)
+                if (tag === 'p') {
+                    indent = $el.getAttribute("data-indent")
+                    if (indent === 0 || indent === '0' || !indent) {
+                        return
+                    } else {
+                        $el.setAttribute('data-indent', (+indent) - 1)
+                    }
+                } else if (tag === 'ul' || tag === 'ol') {
+                }
+            }
+        }
     })
+
     Button.extend(Button(), {
         name: 'quote',
         icon: 'fa fa-quote-left',
         title: '引用',
         tag: 'blockquote',
         typ: 'custom',
-        exec: function() {}
+        exec: function() {
+            var $quote, $start, $end, range = new Range(this.editor),
+                $el, $tmpEle, $insertEl,
+                active = false,
+                children = 0;
+            range.save()
+            $start = this.editor.travelUntilTop(range.range, 0)
+            $end = this.editor.travelUntilTop(range.range, 1)
+            $insertEl = $end.nextSibling
+            $quote = document.createElement('blockquote')
+            for ($el = $start; $el !== $insertEl; ) {
+                $tmpEle = $el.nextSibling
+                if ($el.nodeName.toLowerCase() === 'blockquote') {
+                    var child, nextChild;
+                    for (child = $el.firstChild; child; ) {
+                        nextChild = child.nextSibling
+                        this.editor.$body.insertBefore(child, $tmpEle)
+                        child = nextChild
+                    }
+                    this.editor.$body.removeChild($el)
+                } else {
+                    $quote.appendChild($el)
+                    active = true
+                    children ++
+                }
+                $el = $tmpEle
+            }
+            if (children) {
+                this.editor.$body.insertBefore($quote, $insertEl)
+            }
+            range.restore()
+            this.updateStatus(active)
+        },
+        updateStatus: function(active) {
+            if (active === true || active === false) {
+                active ? this.$a.classList.add('active') : this.$a.classList.remove('active')
+                return
+            }
+            var range = new Range(this.editor)
+            if (range.collapsed === false || !range.range) return;
+            var $start = this.editor.travelUntilTop(range.range, 0);
+            ($start.nodeName.toLowerCase() === 'blockquote') ? this.$a.classList.add('active') : this.$a.classList.remove('active')
+        }
     })
     /**
      *  list
      */
+    /*
     // 将ul或ol下的li元素修改为ol或ul下的li元素, 将当前的ul或ol元素break为多个元素
     // $body 为 $body
     // $list为当前的list元素: ul or ol
@@ -1182,9 +1196,13 @@
             }
         }
     }
+    */
     // this should be ol or ul
     function execList() {
         var range = new Range(this.editor)
+        console.log("range start:", range.range.startContainer, range.range.startOffset)
+        console.log("range end:", range.range.endContainer, range.range.endOffset)
+
         range.save()
         range.doCommand('p', function($ele) {
 
@@ -1463,8 +1481,9 @@
     },
      travelUntil: function($start, cb) {
          while($start !== this.$body.parentNode) {
-             if (cb($start) === true)
-                return $start;
+             if (cb($start) === true) {
+                 return $start;
+             }
              $start = $start.parentNode
          }
          return null
@@ -1480,9 +1499,18 @@
               if (tagArray.indexOf(tag) !== -1) return true
           })
       },
-      travelUntilTop: function($start) {
-          var self = this;
-          return this.travelUntil($start, function($el) {
+      // isEnd === 0: start
+      // isEnd === 1: end
+      travelUntilTop: function(range, isEnd) {
+          var self = this,
+              $node,
+              offset;
+          isEnd ? $node = range.endContainer : $node = range.startContainer;
+          isEnd ? offset = range.endOffset : offset = range.startOffset;
+          if ($node === this.$body) {
+              return this.topLevelEle($node, offset)
+          }
+          return this.travelUntil($node, function($el) {
               if ($el.parentNode === self.$body) return true
           })
       },
@@ -1523,10 +1551,18 @@
     },
     onKeyup: function(event) {
         //console.log('onKeyup', event, event.which, this.upShortCuts)
+        this.cursorPos(event)
         if (this.upShortCuts[event.which]) {
             this.upShortCuts[event.which].call(this, event)
         }
     },
+      // 移除末尾的空p
+      removeTail: function() {
+          var $p = this.$body.lastChild
+          if ($p.nodeName.toLowerCase() === 'p' && $p.innerText === '') {
+              this.$body.removeChild($p)
+          }
+      },
       keydownEnter: function(event) {
         console.log("key down enter")
       },
@@ -1542,14 +1578,44 @@
               shortCuts[key] = handler
           }
       },
+      topLevelEle: function($node, offset) {
+          var $el;
+
+          if (offset === this.$body.children.length) {
+              this.$currentEl = this.$body.lastChild
+              console.log(this.$currentEl)
+              return this.$body.lastChild
+          }
+          $el = this.$body.firstChild
+          for (var i = 0; i < this.$body.children.length; i ++, $el = $el.nextSibling){
+              // 用于光标在table结尾的情况, 此时如果下一个元素也是table，则无法判别当前光标在上一个table还是下一个table
+              // guotie 2014-09-03
+              if (i === offset - 1 && $el.nodeName.toLowerCase() !== 'table' && $el.previousSibling && $el.previousSibling.nodeName.toLowerCase() === 'table') {
+                  this.$currentEl = $el.previousSibling
+              }
+              if (i === offset) {
+                  this.$currentEl = $el;
+                  console.log($el)
+                  return $el
+              }
+          }
+          throw "Not found cursor position over range."
+          return null
+      },
       // 获得输入光标的当前位置
       cursorPos: function(event) {
           var sel = window.getSelection(),
               range = sel.getRangeAt(0),
               $el = range.startContainer,
+              offset = range.startOffset,
               $parent;
 
+          // mostly, this will at a table div or hr
+          if ($el === this.$body) {
+              return this.topLevelEle($el, offset)
+          }
           $parent = $el.parentNode
+          console.log("cursorPos: ", range.startContainer, range.startOffset)
           while ($parent !== this.$body && $el !== this.$body) {
               console.log('cursor pos travel:', $el, 'parent:', $parent)
               $el = $parent

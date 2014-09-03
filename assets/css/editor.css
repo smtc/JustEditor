@@ -453,7 +453,7 @@
   padding: 0;
 }
 .justeditor .je-body table, .editor-style table {
-  width: 100%;
+  width: auto;
   table-layout: fixed;
   border-collapse: collapse;
   border-spacing: 0;
