@@ -135,7 +135,9 @@
         return $el.nodeName.toLowerCase()
     }
     // 将old element变成new tag, 返回new element
-    function transformTo($oel, nTag, range) {
+    // append: true: append the $nel to it's parent
+    //         false: not append the $nel to it's parent
+    function transformTo($oel, nTag, append) {
         var $child,
             $tmp,
             $parent = $oel.parentNode,
@@ -151,13 +153,10 @@
             $nel.appendChild($child)
         }
 
-        if (range) {
-            console.log('transformTo will modify range ........', range._start, range._end);
-            (range._start === $oel) && (range._start = $nel);
-            (range._end === $oel) && (range._end = $nel);
+        if (append === true) {
+            $parent.insertBefore($nel, $oel)
+            $parent.removeChild($oel)
         }
-        $parent.insertBefore($nel, $oel)
-        $parent.removeChild($oel)
         return $nel
     }
     // $s: start element
@@ -240,7 +239,7 @@
       this.sel = window.getSelection ? window.getSelection() : document.getSelection()
       this.range = (this.sel && this.sel.rangeCount) ? this.sel.getRangeAt(0) : null
       this.editor = editor
-      this.range !== null ? this.collapsed = this.range.collapsed : undefined
+      this.range !== null ? (this.collapsed = this.range.collapsed) : undefined
   }
   Range.prototype = {
       rangeAtEnd: function(editor) {
@@ -404,6 +403,55 @@
              (nodetag === 'p' && this.editor.$currentEl === nd) ? (this.editor.$currentEl = fn(nd)) : fn(nd)
           }
       },
+      // call this function, the range.save() should be called before
+      // after range.save
+      removeChild: function(parent, child, nchild) {
+          if (this._start && this._start === child) {
+              this._start = nchild
+          }
+          if (this._end && this._end === child) {
+              this._end = nchild
+          }
+          parent.removeChild(child)
+      },
+
+      breakList: function($list, $li) {
+          var $p, $nList,
+              $start,
+              $next,
+              $insertPos = $list.nextSibling,
+              liPrev = 0,
+              liAfter = 0,
+              converted = false;
+          for ($start = $list.firstChild; $start; ) {
+              $next = $start.nextSibling
+              if ($li === $start) {
+                  $p = transformTo($li, 'p')
+                  this.removeChild($list, $li, $p)
+                  if (liPrev > 0) {
+                      $list.parentNode.insertBefore($p, $insertPos)
+                  } else {
+                      // 这是第一个li
+                      $list.parentNode.insertBefore($p, $list)
+                      return
+                  }
+                  converted = true
+              } else {
+                  if (converted) {
+                      if (liAfter === 0) {
+                          $nList = document.createElement($list.nodeName)
+                      }
+                      $nList.appendChild($start)
+                  } else {
+                      liPrev ++;
+                  }
+              }
+              $start = $next
+          }
+          if (liAfter) {
+              $list.parentNode.insertBefore($nList, $insertPos)
+          }
+      },
       // list
       // 只有开始元素与结束元素的父节点相同时，才做进一步的处理
       //
@@ -411,6 +459,114 @@
       //    从当前元素开始处理，直到该元素的同级元素处理完，向上处理，直到range的end元素及end branch元素
       //
       convertToList: function(ntag) {
+          var $start,
+              tag,
+              $first,
+              $last,
+              $next,
+              $insertPos,
+              $nList,
+              $li,
+              $parent;
+          if (!this.range) return;
+          $first = this.editor.travelUntilTags(this.range.startContainer, ['p', 'li'])
+          $last = this.editor.travelUntilTags(this.range.endContainer, ['p', 'li'])
+
+          $parent = $first.parentNode
+          if (this.collapsed) {
+              tag = nodename($parent)
+              $nList = document.createElement(ntag)
+              this.save()
+              if (tag === 'ol' || tag === 'ul') {
+                  // break list
+                  this.breakList($first.parentNode, $first)
+              } else if (nodename($first) === 'p'){
+                  $li = transformTo($first, 'li', false)
+                  $nList.appendChild($li)
+                  $parent.insertBefore($nList, $first)
+                  this.removeChild($parent, $first, $li)
+              }
+              this.restore()
+              return
+          }
+
+          // 如果选中的是一整个ul或ol, 将对整个这个元素进行变换
+          tag = nodename($parent)
+          if ((tag === 'ul' || tag === 'ol') && $first.parentNode === $last.parentNode && $first === $parent.firstChild && $last === $parent.lastChild) {
+              var $p,
+                  $ancient = $parent.parentNode
+              this.save()
+              if (tag === ntag) {
+                  // 移除parent, 变成p
+                  $insertPos = $parent.nextSibling
+                  for ($start = $first; $start; ) {
+                    $next = $start.nextSibling
+                    $p = transformTo($start, 'p')
+                    $ancient.insertBefore($p, $insertPos)
+                    $start = $next
+                  }
+                  $ancient.removeChild($parent)
+              } else {
+                  // 变成ntag
+                  $nList = transformTo($parent, ntag, true)
+              }
+              this.restore()
+              return
+          }
+
+          // 将所有选中的元素，尽最大的可能合并为一个list
+
+          // 如果选中开始元素是父元素的第一个元素，且选中元素为li，或父元素为blockquote，则选中区域上升为其父节点
+          if ( $first === $parent.firstChild ) {
+              (nodename($first) === 'li' || nodename($parent) === 'blockquote') && ($first = $parent);
+          }
+          $parent = $last.parentNode
+          if ($last === $parent.lastChild) {
+              (nodename($last) === 'li' || nodename($parent) === 'blockquote') && ($last = $parent);
+          }
+          if ($first.parentNode !== $last.parentNode) {
+              console.log("start node position not same with end node position, not handle it.", $first, $last)
+              return
+          }
+          $nList = document.createElement(ntag)
+          $parent = $first.parentNode
+          $insertPos = $last.nextSibling
+          var childCount = 0
+          this.save()
+          for ($start = $first; $start != $insertPos; ) {
+              tag = nodename($start)
+              $next = $start.nextSibling
+              if (tag === 'p') {
+                  $li = transformTo($start, 'li', false)
+                  $nList.appendChild($li)
+                  this.removeChild($parent, $start, $li)
+                  childCount ++
+              } else if (tag === 'ol' || tag === 'ul') {
+                  var $child,
+                      $nextChild
+                  for ($child = $start.firstChild; $child; ) {
+                      $nextChild = $child.nextSibling
+                      $nList.appendChild($child)
+                      childCount ++
+                      $child = $child.nextSibling
+                  }
+                  this.removeChild($parent, $start, $li)
+              } else {
+                  if (childCount > 0) {
+                      // close the list, create a new list
+                      $parent.insertBefore($nList, $start)
+                      $nList = document.createElement(ntag)
+                      childCount = 0
+                  }
+              }
+              $start = $next
+          }
+          if (childCount) {
+              $parent.insertBefore($nList, $insertPos)
+          } else {
+              //document.removeChild($nList)
+          }
+          this.restore()
       },
       // 将blockquote的子元素元素变为list
       convertQuoteToList: function($quote, ntag) {
@@ -669,12 +825,15 @@
   TextButton.prototype.execMenuCmd = function(event, cmd) {
     console.log('execMenuCmd: ', cmd)
       var range = this.range
+      range.save()
       range.doCommand('p', function($el) {
         console.log('text button docommand:', $el, cmd)
         var tag = $el.nodeName
           if (tag === cmd) return $el;
-          return transformTo($el, cmd, range)
+          return transformTo($el, cmd, true)
       })
+      range.restore()
+      this.editor.cursorPos()
       this.updateStatus()
   }
 
@@ -1203,11 +1362,7 @@
         console.log("range start:", range.range.startContainer, range.range.startOffset)
         console.log("range end:", range.range.endContainer, range.range.endOffset)
 
-        range.save()
-        range.doCommand('p', function($ele) {
-
-        })
-        range.restore()
+        range.convertToList(this.tag)
     }
     var OlButton = Button.extend(Button(), {
         name: 'ol',
