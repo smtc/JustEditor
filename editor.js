@@ -244,12 +244,12 @@
           var start = this.range.startContainer,
               end = this.range.endContainer,
               result = {
-                  brother: false,
                   start: null, // 开始的不完整节点
                   nodes: [],   // 中间的完整节点
                   end: null    // 末尾的不完整节点
-              },
-              startLine = []
+              }
+
+          console.log("getRangeAllNodes: ", this.range, start, end)
 
           // 找到最左边的叶子节点
           function leafNode(_ele) {
@@ -285,16 +285,18 @@
           //
           // 数组中的顺序为：先叶子节点，然后父节点....
           function travsel(_start, _end) {
+              console.log("travsel start:", _start)
+              console.log("travsel end: ", _end)
               result.nodes.push(_start)
               var _node
-              while(_node = nextNode(_start) !== _end) {
+              while(_node = nextNode(_start) != _end) {
                   result.nodes.push(_node)
               }
           }
 
           if (this.range.startContainer === this.range.endContainer ) {
               if (!this.range.startContainer.hasChildNodes()) {
-                  result.brother = true
+                  result.start = {}
                   result.start.startContainer = this.range.startContainer
                   result.start.startOffset = this.range.startOffset
                   result.start.endContainer = this.range.endContainer
@@ -312,11 +314,13 @@
 
           // 定位开始节点
           start = this.range.startContainer
+          console.log("before compute start node: ", start, this.range.startOffset)
           if (start.hasChildNodes()) {
               start = leafNode(start.childNodes[this.range.startOffset])
           } else {
               if (this.range.startOffset !== 0) {
                   // 开始节点应该不完整的textNode
+                  result.start = {}
                   result.start.startContainer = result.start.endContainer = start
                   result.start.startOffset = this.range.startOffset
                   result.start.endOffset = start.length
@@ -324,6 +328,7 @@
                   start = nextNode(this.range.startContainer)
               }
           }
+          console.log("compute start node: ", start)
 
           // 定位结束节点
           end = this.range.endContainer
@@ -332,11 +337,13 @@
           } else {
               if (this.range.endOffset !== end.length) {
                   // 结束节点不完整
+                  result.end = {}
                   result.end.startContainer = result.end.endContainer = end
                   result.end.startOffset = 0
                   result.end.endOffset = this.range.endOffset
                   // 重新设置结束节点
                   end = nextNode(end)
+                  console.log("end node: ", end)
               }
           }
           travsel(start, end)
@@ -922,9 +929,8 @@
         exec: function() {},
         colorClick: function(event) {
             var rg = new Range(this.editor),
-                $span,
-                $parent,
-                color
+                color,
+                $node;
 
             if (rg.collapsed) {
                 // 进入color模式
@@ -932,90 +938,76 @@
             }
             color = event.target.getAttribute('data-color')
             console.log(rg.range.startContainer, rg.range.startOffset, rg.range.endContainer, rg.range.endOffset)
-            return document.execCommand('foreColor', false, color);
+            //return document.execCommand('foreColor', false, color);
 
-            if (rg.range.startContainer === rg.range.endContainer) {
-                // 在同一个文本内
-                return
-            }
-            // this should be range
-            function partialColor(el, clr) {
-                var child,
-                    parent,
-                    ancient,
-                    span
+            function partialColor(_ele, clr) {
+                var el = _ele.startContainer,
+                    parent = el.parentNode,
+                    ancient = parent.parentNode,
+                    startPos = _ele.startOffset,
+                    endPos = _ele.endOffset,
+                    text,
+                    span,
+                    headText,
+                    midText,
+                    midSpan,
+                    tailText
 
-                parent = el.parentNode
-                ancient = parent.parentNode
-                if (el.nodeType !== 3) return;
-
-                if (this.range.startContainer === el || this.range.endContainer === el) {
-                    var startPos,
-                        endPos,
-                        headText,
-                        midText,
-                        midSpan,
-                        tailText
-
-                    parent = el.parentNode
-                    ancient = parent.parentNode
-
-                    if (this.range.startContainer === this.range.endContainer) {
-                        startPos = this.range.startOffset
-                        endPos = this.range.endOffset
-                    } else if (this.range.startContainer === el) {
-                        startPos = this.range.startOffset
-                        endPos = this.range.startContainer.innerText.length
-                    } else {
-                        startPos = 0
-                        endPos = this.range.endContainer.innerText.length
-                    }
-                    if (startPos !== 0) {
-                        headText = Array.slice.call(el.innerText, 0, startPos)
-                    }
-                    if (endPos !== el.innerText.length) {
-                        tailText = Array.slice.call(el.innerText, endPos, el.innerText.length)
-                    }
-                    midText = Array.slice.call(el.innerText, startPos, endPos)
-
-                    if (nodename(parent) === 'span') {
-                        if (clr) {
-                            midSpan = document.createElement('span')
-                            midSpan.innerText = midText
-                        }
-                        // break span
-                        if (headText.length) {
-                            parent.innerText = headText
-                            ancient.insertBefore(clr ? midSpan : midText, parent.nextSibling)
-                            if (tailText.length) {
-                                span = document.createElement('span')
-                                span.setAttribute('style', parent.setAttribute('style'))
-                                span.innerText = tailText
-                                ancient.insertBefore(span, clr? midSpan.nextSibling : midText.nextSibling)
-                            }
-                        } else {
-                            ancient.insertBefore(clr ? midSpan : midText, parent)
-                            if (tailText.length) {
-                                parent.innerText = tailText
-                            } else {
-                                ancient.removeChild(parent)
-                            }
-                        }
-                    } else {
-                        if (clr) {
-                            // 增加span元素来实现color
-                            span = document.createElement('span')
-                            span.setAttribute('style', 'color:' + clr + ';')
-                            span.innerText = Array.slice.call(el.innerText, startPos, endPos)
-                            console.log(span.innerText)
-                            parent.removeChild(el)
-                            parent.appendChild(headText)
-                            parent.appendChild(span)
-                            parent.appendChild(tailText)
-                        }
-                    }
-                    return
+                if (el.nodeType !== 3) {
+                    return;
                 }
+
+                console.log(el, typeof el)
+                console.log(el.textContent, typeof el.textContent)
+                text = el.textContent.split('')
+                if (startPos !== 0) {
+                    headText = text.slice(0, startPos).join('')
+                }
+                if (endPos !== el.length) {
+                    tailText = text.slice(endPos, el.length).join('')
+                }
+                midText = text.slice(startPos, endPos).join('')
+
+                console.log("headText: ", headText, " midText: ", midText, " tailText: ", tailText)
+
+                if (nodename(parent) === 'span') {
+                    if (clr) {
+                        midSpan = document.createElement('span')
+                        midSpan.setAttribute('style', 'color:' + clr + ';')
+                        midSpan.innerText = midText
+                    }
+                    // break span
+                    if (headText) {
+                        parent.innerText = headText
+                        ancient.insertBefore(clr ? midSpan : midText, parent.nextSibling)
+                        if (tailText) {
+                            span = document.createElement('span')
+                            span.setAttribute('style', parent.setAttribute('style'))
+                            span.innerText = tailText
+                            ancient.insertBefore(span, clr ? midSpan.nextSibling : midText.nextSibling)
+                        }
+                    } else {
+                        ancient.insertBefore(clr ? midSpan : midText, parent)
+                        if (tailText) {
+                            parent.innerText = tailText
+                        } else {
+                            ancient.removeChild(parent)
+                        }
+                    }
+                } else {
+                    if (clr) {
+                        // 增加span元素来实现color
+                        span = document.createElement('span')
+                        span.setAttribute('style', 'color:' + clr + ';')
+                        span.innerText = midText
+                        console.log(span.innerText)
+                        parent.removeChild(el)
+                        headText && parent.appendChild(document.createTextNode(headText));
+                        parent.appendChild(span)
+                        tailText && parent.appendChild(document.createTextNode(tailText));
+                    }
+                }
+                return
             }
             function addColor($el, clr) {
                 // 不需要break元素
@@ -1039,10 +1031,22 @@
                     }
                 }
             }
-            rg.doCommand('all', function(nd) {
-                // this is rg
-                addColor.call(this, nd, color)
-            })
+            rg.save()
+            var result = rg.getRangeAllNodes(this.editor.$body.parentNode)
+            console.log(result)
+            if (result.start) {
+                partialColor(result.start, color)
+            }
+
+             for (var i = 0; i < result.nodes.length; i ++) {
+                 $node = result.nodes[i]
+                 addColor($node, color)
+             }
+
+            if (result.end) {
+                partialColor(result.end, color)
+            }
+            rg.restore()
         },
         excludeButtons: []
     })
