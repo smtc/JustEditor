@@ -179,29 +179,7 @@
         console.log('  travel default:', !cond)
         return !cond
     }
-    // 尝试将list与前面的元素和后面的元素合并
-    function _mergeList($first, $second) {
-        for (var $p = $second.firstChild; $p; $p = $p.nextSibling) {
-            $first.appendChild($p)
-        }
-        return $first
-    }
-    // 合并元素
-    // dir: 合并反向
-    //   "prev": 合并prev元素
-    //   "next": 合并next元素
-    //   "all" or undefined: 合并lnext，prev元素
-    function mergeList($list, dir) {
-        var tag = $list.nodeName
-        if (!dir) dir = "all";
-        if ($list.previousSibling && $list.previousSibling.nodeName === tag && (dir === 'all' || dir === 'prev')) {
-            $list = _mergeList($list.previousSibling, $list)
-        }
-        if ($list.nextSibling && $list.nextSibling.nodeName === tag && (dir === 'all' || dir === 'next')) {
-            _mergeList($list, $list.nextSibling)
-        }
-        return $list
-    }
+
   var Range = function(editor) {
       this.sel = window.getSelection ? window.getSelection() : document.getSelection()
       this.range = (this.sel && this.sel.rangeCount) ? this.sel.getRangeAt(0) : null
@@ -257,61 +235,111 @@
             e = _error;
         }
     },
+      // range.collapsed should not handle in this function
       // root 应该是editor.$body.parentNode
+      // 返回所有的叶子节点
       getRangeAllNodes: function(root, filterFn) {
-          if (!this.range) return [];
-          if (this.range.collapsed) return [this.range.endContainer];
+          if (!this.range) return null;
 
           var start = this.range.startContainer,
               end = this.range.endContainer,
-              result = [],
+              result = {
+                  brother: false,
+                  start: null, // 开始的不完整节点
+                  nodes: [],   // 中间的完整节点
+                  end: null    // 末尾的不完整节点
+              },
               startLine = []
 
-          // 遍历parent节点, child右边的所有元素，深度优先
-          // return true will stop the travel iteration
-          function travelPartial(parent, child) {
-              if (child === end) {
-                  return true
+          // 找到最左边的叶子节点
+          function leafNode(_ele) {
+              var _child = _ele.firstChild
+              while(_child) {
+                  _ele = _child
+                  _child = _ele.firstChild
               }
-
-              if(child.hasChildNodes()) {
-                  if(travelPartial(child, child.firstChild) === true) {
-                      return true
+              return _ele
+          }
+          // 查找下一个节点
+          // 首先，取该节点的nextSibling，如果不为空，取其最左边的叶子节点
+          // 如果为空, 取其父节点的nextSibling的第一个叶子节点, 如此递归向上,
+          // 直到到达根节点
+          function nextNode(_ele) {
+              while(_ele.parentNode !== root) {
+                  if(_ele.nextSibling) {
+                      var _res = _ele.nextSibling, _child = _res.firstChild
+                      while(_child) {
+                          _res = _child
+                          _child = _child.firstChild
+                      }
+                      return _res
                   }
+                  _ele = _ele.parentNode
               }
+              // 到达根节点
+              console.log("Warning: nextNode return null!!!")
+              return null
+          }
 
-              filterFn ? (filterFn(child) && result.push(child)) :  result.push(child);
-
-              var next = child.nextSibling
-              if (!next) {
-                  return
+          // start节点和end节点都是叶子节点
+          //
+          // 数组中的顺序为：先叶子节点，然后父节点....
+          function travsel(_start, _end) {
+              result.nodes.push(_start)
+              var _node
+              while(_node = nextNode(_start) !== _end) {
+                  result.nodes.push(_node)
               }
-
-              travelPartial(parent, next)
           }
 
-          if(start.hasChildNodes()) {
-              travelPartial(start, start.firstChild)
-          }
-          filterFn ? (filterFn(child) && result.push(child)) :  result.push(child);
-          var child = start.nextSibling,
-              parent
-
-          for (var tmp = start.parentNode; tmp && tmp !== root && tmp !== end; tmp = tmp.parentNode) {
-              startLine.push(tmp)
-          }
-
-          for (var i = 0; i < startLine.length; i ++) {
-              parent = startLine[i]
-              while(child) {
-                  if(travelPartial(parent, child) === true) {
-                      return result
-                  }
-                  child = child.nextSibling
+          if (this.range.startContainer === this.range.endContainer ) {
+              if (!this.range.startContainer.hasChildNodes()) {
+                  result.brother = true
+                  result.start.startContainer = this.range.startContainer
+                  result.start.startOffset = this.range.startOffset
+                  result.start.endContainer = this.range.endContainer
+                  result.start.endOffset = this.range.endOffset
+              } else {
+                  // 将所有的子节点push到nodes中去
+                  start = leafNode(this.range.startContainer[this.range.startOffset])
+                  end = nextNode(this.range.endContainer[this.range.endOffset - 1])
+                  travsel(start, end)
               }
-              filterFn ? (filterFn(child) && result.push(child)) :  result.push(child);
-              child = parent.nextSibling
+              return result
           }
+
+          // 开始节点与结束节点不同的情况
+
+          // 定位开始节点
+          start = this.range.startContainer
+          if (start.hasChildNodes()) {
+              start = leafNode(start.childNodes[this.range.startOffset])
+          } else {
+              if (this.range.startOffset !== 0) {
+                  // 开始节点应该不完整的textNode
+                  result.start.startContainer = result.start.endContainer = start
+                  result.start.startOffset = this.range.startOffset
+                  result.start.endOffset = start.length
+                  // 重新设置开始节点
+                  start = nextNode(this.range.startContainer)
+              }
+          }
+
+          // 定位结束节点
+          end = this.range.endContainer
+          if (end.hasChildNodes()) {
+              end = nextNode(end[this.range.endOffset - 1])
+          } else {
+              if (this.range.endOffset !== end.length) {
+                  // 结束节点不完整
+                  result.end.startContainer = result.end.endContainer = end
+                  result.end.startOffset = 0
+                  result.end.endOffset = this.range.endOffset
+                  // 重新设置结束节点
+                  end = nextNode(end)
+              }
+          }
+          travsel(start, end)
 
           return result
       },
@@ -365,9 +393,10 @@
           } else if (nodetag === 'all') {
               nodes = this.getRangeAllNodes(this.editor.$body.parentNode)
           }
+          console.log(nodes)
           for (var i = 0; i < nodes.length; i++) {
              nd = nodes[i];
-             (nodetag === 'p' && this.editor.$currentEl === nd) ? (this.editor.$currentEl = fn(nd)) : fn(nd)
+             (nodetag === 'p' && this.editor.$currentEl === nd) ? (this.editor.$currentEl = fn.call(this, nd)) : fn.call(this, nd)
           }
       },
       // call this function, the range.save() should be called before
@@ -741,19 +770,15 @@
         event.stopPropagation()
         return false
     },
-    exec: function(event) {
-    },
+    exec: function(event) { },
     updateStatus: function(event) {
         if (this.typ === 'basic') {
-            if ( document.queryCommandState(this.command) === true ) {
-                this.$a.classList.add('active')
-            } else {
-                this.$a.classList.remove('active')
-            }
+            ( document.queryCommandState(this.command) === true ) ?
+                this.$a.classList.add('active') :  this.$a.classList.remove('active')
         }
     }
   }
-    _extend(Event, Button.prototype)
+  _extend(Event, Button.prototype)
 
   Button.extend = function(fn, props) {
       var btn = extend.call(this, fn, props)
@@ -888,6 +913,171 @@
         menu: false,
         excludeButtons: []
     })
+    var ColorTextButton = Button.extend(Button(), {
+        name: 'color',
+        icon: 'fa fa-font',
+        title: '文字颜色',
+        tag: '',
+        typ: 'menu',
+        exec: function() {},
+        colorClick: function(event) {
+            var rg = new Range(this.editor),
+                $span,
+                $parent,
+                color
+
+            if (rg.collapsed) {
+                // 进入color模式
+                return;
+            }
+            color = event.target.getAttribute('data-color')
+            console.log(rg.range.startContainer, rg.range.startOffset, rg.range.endContainer, rg.range.endOffset)
+            return document.execCommand('foreColor', false, color);
+
+            if (rg.range.startContainer === rg.range.endContainer) {
+                // 在同一个文本内
+                return
+            }
+            // this should be range
+            function partialColor(el, clr) {
+                var child,
+                    parent,
+                    ancient,
+                    span
+
+                parent = el.parentNode
+                ancient = parent.parentNode
+                if (el.nodeType !== 3) return;
+
+                if (this.range.startContainer === el || this.range.endContainer === el) {
+                    var startPos,
+                        endPos,
+                        headText,
+                        midText,
+                        midSpan,
+                        tailText
+
+                    parent = el.parentNode
+                    ancient = parent.parentNode
+
+                    if (this.range.startContainer === this.range.endContainer) {
+                        startPos = this.range.startOffset
+                        endPos = this.range.endOffset
+                    } else if (this.range.startContainer === el) {
+                        startPos = this.range.startOffset
+                        endPos = this.range.startContainer.innerText.length
+                    } else {
+                        startPos = 0
+                        endPos = this.range.endContainer.innerText.length
+                    }
+                    if (startPos !== 0) {
+                        headText = Array.slice.call(el.innerText, 0, startPos)
+                    }
+                    if (endPos !== el.innerText.length) {
+                        tailText = Array.slice.call(el.innerText, endPos, el.innerText.length)
+                    }
+                    midText = Array.slice.call(el.innerText, startPos, endPos)
+
+                    if (nodename(parent) === 'span') {
+                        if (clr) {
+                            midSpan = document.createElement('span')
+                            midSpan.innerText = midText
+                        }
+                        // break span
+                        if (headText.length) {
+                            parent.innerText = headText
+                            ancient.insertBefore(clr ? midSpan : midText, parent.nextSibling)
+                            if (tailText.length) {
+                                span = document.createElement('span')
+                                span.setAttribute('style', parent.setAttribute('style'))
+                                span.innerText = tailText
+                                ancient.insertBefore(span, clr? midSpan.nextSibling : midText.nextSibling)
+                            }
+                        } else {
+                            ancient.insertBefore(clr ? midSpan : midText, parent)
+                            if (tailText.length) {
+                                parent.innerText = tailText
+                            } else {
+                                ancient.removeChild(parent)
+                            }
+                        }
+                    } else {
+                        if (clr) {
+                            // 增加span元素来实现color
+                            span = document.createElement('span')
+                            span.setAttribute('style', 'color:' + clr + ';')
+                            span.innerText = Array.slice.call(el.innerText, startPos, endPos)
+                            console.log(span.innerText)
+                            parent.removeChild(el)
+                            parent.appendChild(headText)
+                            parent.appendChild(span)
+                            parent.appendChild(tailText)
+                        }
+                    }
+                    return
+                }
+            }
+            function addColor($el, clr) {
+                // 不需要break元素
+                var parent = $el.parentNode,
+                    ancient = parent.parentNode,
+                    span = document.createElement('span')
+                if (nodename(parent) === 'span') {
+                    if (clr) {
+                        parent.setAttribute('style', 'color:' + clr + ';')
+                    } else {
+                        // 移除span
+                        ancient.insertBefore($el, parent)
+                        ancient.removeChild(parent)
+                    }
+                } else {
+                    // 增加颜色<span>
+                    if (clr) {
+                        span.setAttribute('style', 'color:' + clr + ';')
+                        parent.insertBefore(span, el)
+                        span.appendChild(el)
+                    }
+                }
+            }
+            rg.doCommand('all', function(nd) {
+                // this is rg
+                addColor.call(this, nd, color)
+            })
+        },
+        excludeButtons: []
+    })
+
+    var frontTextColors = ['#ef6559', '#e28b41', '#c8a732', '#209361', '#418caf', '#7071ac', '#aa8773', '#777777' ],
+        backgroundColors = []
+    ColorTextButton.prototype.renderMenu = function() {
+        var $menuDiv = document.createElement('div'),
+            $ul = document.createElement('ul'),
+            $li, $a,
+            self = this;
+        $menuDiv.setAttribute('class', "toolbar-menu toolbar-menu-color")
+        $ul.setAttribute('class', 'color-list')
+        for( var i = 0; i <= frontTextColors.length; i ++) {
+            $li = document.createElement('li')
+            if (i !== frontTextColors.length) {
+                $li.innerHTML = '<a href="javascript:;" class="font-color font-color-' +
+                    i +
+                    ' " data-color="' +
+                    frontTextColors[i] +
+                    '"></a>';
+            } else {
+                $li.innerHTML = '<li class="remove-color"><a href="javascript:;" class="link-remove-color">去掉颜色</a></li>';
+            }
+            $a = $li.firstChild
+            $a.addEventListener('click', function(event) {
+                self.colorClick.call(self, event)
+            })
+            $ul.appendChild($li)
+        }
+
+        $menuDiv.appendChild($ul)
+        this.$el.appendChild($menuDiv)
+    }
+
     Button.extend(Button(), {
         name: 'hr',
         icon: 'fa fa-minus',
@@ -1139,7 +1329,6 @@
             vm.$body.insertBefore($table, vm.$currentEl.nextSibling)
         }
     })
-    console.log('table button:', TableButton.prototype)
     TableButton.prototype.renderMenu = function() {
         var $menuDiv = document.createElement('div')
         $menuDiv.setAttribute('class', "toolbar-menu toolbar-menu-table")
@@ -1192,7 +1381,7 @@
   }
 
   var defaultOptions = {
-      toolbars: ['title', 'bold', 'italic', 'underline', 'strike', 'sp', 'ol', 'ul', 'indent', 'outdent', 'quote', 'hr', 'sp', 'table']
+      toolbars: ['title', 'bold', 'italic', 'underline', 'strike', 'color', 'sp', 'ol', 'ul', 'indent', 'outdent', 'quote', 'hr', 'sp', 'table']
   }
   /**
    *	JustEditor
@@ -1255,6 +1444,10 @@
             if (name === 'sp') {
                 var $li = document.createElement('li')
                 $li.innerHTML = '<span class="separator"></span>'
+                $li.addEventListener('click', function(event) {
+                    var range = new Range()
+                    range.range  && console.log(range.range.startContainer, range.range.startOffset, range.range.endContainer, range.range.endOffset)
+                })
                 this.$menuUl.appendChild($li)
                 continue
             } else {
@@ -1410,10 +1603,8 @@
         console.log("key down enter")
       },
       keyupDel: function(event) {
-
       },
-      keyBackspace: function(event) {
-
+      keyupBackspace: function(event) {
       },
       registerShortCut: function(method, key, handler) {
           var shortCuts = method === 'up' ? this.upShortCuts : this.downShortCuts
