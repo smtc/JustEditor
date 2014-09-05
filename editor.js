@@ -249,7 +249,7 @@
                   end: null    // 末尾的不完整节点
               }
 
-          console.log("getRangeAllNodes: ", this.range, start, end)
+          console.log("getRangeAllNodes: ", this.range, this.range.startContainer, start, end)
 
           // 找到最左边的叶子节点
           function leafNode(_ele) {
@@ -287,9 +287,10 @@
           function travsel(_start, _end) {
               console.log("travsel start:", _start)
               console.log("travsel end: ", _end)
-              result.nodes.push(_start)
+              if (result.end && _start !== result.end.endContainer) 
+                result.nodes.push(_start)
               var _node
-              while(_node = nextNode(_start) != _end) {
+              for(_node = nextNode(_start); _node != _end; _node = nextNode(_node)) {
                   result.nodes.push(_node)
               }
           }
@@ -332,6 +333,7 @@
 
           // 定位结束节点
           end = this.range.endContainer
+          console.log("before compute end node: ", end)
           if (end.hasChildNodes()) {
               end = nextNode(end[this.range.endOffset - 1])
           } else {
@@ -341,11 +343,13 @@
                   result.end.startContainer = result.end.endContainer = end
                   result.end.startOffset = 0
                   result.end.endOffset = this.range.endOffset
-                  // 重新设置结束节点
-                  end = nextNode(end)
-                  console.log("end node: ", end)
-              }
+              } 
+              // 重新设置结束节点
+              end = nextNode(end)
+              console.log("end node: ", end)
+              
           }
+          console.log("compute end node: ", end)
           travsel(start, end)
 
           return result
@@ -1026,8 +1030,8 @@
                     // 增加颜色<span>
                     if (clr) {
                         span.setAttribute('style', 'color:' + clr + ';')
-                        parent.insertBefore(span, el)
-                        span.appendChild(el)
+                        parent.insertBefore(span, $el)
+                        span.appendChild($el)
                     }
                 }
             }
