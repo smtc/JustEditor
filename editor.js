@@ -287,7 +287,7 @@
           function travsel(_start, _end) {
               console.log("travsel start:", _start)
               console.log("travsel end: ", _end)
-              if (result.end && _start !== result.end.endContainer) 
+              if ((result.end && _start !== result.end.endContainer) || !result.end)
                 result.nodes.push(_start)
               var _node
               for(_node = nextNode(_start); _node != _end; _node = nextNode(_node)) {
@@ -333,9 +333,9 @@
 
           // 定位结束节点
           end = this.range.endContainer
-          console.log("before compute end node: ", end)
+          console.log("before compute end node: ", end, this.range.endOffset)
           if (end.hasChildNodes()) {
-              end = nextNode(end[this.range.endOffset - 1])
+              end = nextNode(end.childNodes[this.range.endOffset === 0 ? 0 : this.range.endOffset - 1])
           } else {
               if (this.range.endOffset !== end.length) {
                   // 结束节点不完整
@@ -343,11 +343,11 @@
                   result.end.startContainer = result.end.endContainer = end
                   result.end.startOffset = 0
                   result.end.endOffset = this.range.endOffset
-              } 
+              } else {
               // 重新设置结束节点
-              end = nextNode(end)
+                end = nextNode(end)
+              }
               console.log("end node: ", end)
-              
           }
           console.log("compute end node: ", end)
           travsel(start, end)
@@ -409,17 +409,6 @@
              nd = nodes[i];
              (nodetag === 'p' && this.editor.$currentEl === nd) ? (this.editor.$currentEl = fn.call(this, nd)) : fn.call(this, nd)
           }
-      },
-      // call this function, the range.save() should be called before
-      // after range.save
-      removeChild: function(parent, child, nchild) {
-          if (this._start && this._start === child) {
-              this._start = nchild
-          }
-          if (this._end && this._end === child) {
-              this._end = nchild
-          }
-          parent.removeChild(child)
       },
 
       breakList: function($list, $li) {
@@ -499,7 +488,8 @@
 
           // 如果选中的是一整个ul或ol, 将对整个这个元素进行变换
           tag = nodename($parent)
-          if ((tag === 'ul' || tag === 'ol') && $first.parentNode === $last.parentNode && $first === $parent.firstChild && $last === $parent.lastChild) {
+          if ((tag === 'ul' || tag === 'ol') && $first.parentNode === $last.parentNode
+               && $first === $parent.firstChild && $last === $parent.lastChild) {
               var $p,
                   $ancient = $parent.parentNode
               this.save()
@@ -592,9 +582,33 @@
               $quote.appendChild($nList)
           }
       },
+      // call this function, the range.save() should be called before
+      // after range.save
+      removeChild: function(parent, child, nchild, startOffset, endOffset) {
+          if (this._start && this._start === child) {
+              this._start = nchild;
+              (startOffset !== undefined) && (this._startOffset = startOffset);
+              console.log("reset startContainer to ", nchild, " , startOffset to ", startOffset)
+          }
+          if (this._end && this._end === child) {
+              this._end = nchild;
+              endOffset && (this._endOffset = endOffset);
+              console.log("reset endContainer to ", nchild, " , endOffset to ", endOffset)
+
+          }
+          parent.removeChild(child)
+      },
+      setStart: function (_start, _offset) {
+        _start && (this._start = _start);
+        _offset && (this._startOffset = _offset);
+      },
+      setEnd: function(_end, _offset) {
+        _end && (this._end = _end)
+        _offset && (this._endOffset = _offset)
+      },
       save: function() {
           if (!this.range) {
-              console.log("range.save: this.range is null!!!")
+              throw "range.save: this.range is null!!!"
               return
           };
           if (this._start) return;
@@ -602,10 +616,12 @@
           this._startOffset = this.range.startOffset
           this._end = this.range.endContainer
           this._endOffset = this.range.endOffset
+          console.log("range save: ", this._startOffset, this._endOffset)
           return this
       },
       restore: function(or) {
           var rg = or ? or : this
+          console.log("restore: ", rg._start,rg._startOffset, rg._end, rg._endOffset)
           this.clear()
           var range = document.createRange();
           range.setStart(rg._start, rg._startOffset);
@@ -763,11 +779,13 @@
                 // hide menu
                 this.$el.classList.remove('menu-on')
                 // exec the command
-                var cmd = $el.getAttribute('data-param')
-                this.range = new Range(this.editor)
-                this.range.save()
-                this.execMenuCmd && this.execMenuCmd(event, cmd)
-                this.range.restore()
+                if (this.execMenuCmd) {
+                  var cmd = $el.getAttribute('data-param')
+                  this.range = new Range(this.editor)
+                  this.range.save()
+                  this.execMenuCmd(event, cmd)
+                  this.range.restore()
+                }
             }
         } else if (this.typ === 'basic') {
             console.log('exec command: ', this.command)
@@ -936,6 +954,7 @@
                 color,
                 $node;
 
+            event.preventDefault();
             if (rg.collapsed) {
                 // 进入color模式
                 return;
@@ -972,8 +991,6 @@
                 }
                 midText = text.slice(startPos, endPos).join('')
 
-                console.log("headText: ", headText, " midText: ", midText, " tailText: ", tailText)
-
                 if (nodename(parent) === 'span') {
                     if (clr) {
                         midSpan = document.createElement('span')
@@ -995,7 +1012,7 @@
                         if (tailText) {
                             parent.innerText = tailText
                         } else {
-                            ancient.removeChild(parent)
+                            rg.removeChild(ancient, parent, clr ? midSpan : midText, 0, clr ? 1 : midText.length)
                         }
                     }
                 } else {
@@ -1005,10 +1022,10 @@
                         span.setAttribute('style', 'color:' + clr + ';')
                         span.innerText = midText
                         console.log(span.innerText)
-                        parent.removeChild(el)
-                        headText && parent.appendChild(document.createTextNode(headText));
-                        parent.appendChild(span)
-                        tailText && parent.appendChild(document.createTextNode(tailText));
+                        headText && parent.insertBefore(document.createTextNode(headText), el);
+                        parent.insertBefore(span, el)
+                        tailText && parent.insertBefore(document.createTextNode(tailText), el);
+                        rg.removeChild(parent, el, span, 0, 1)
                     }
                 }
                 return
@@ -1018,13 +1035,14 @@
                 var parent = $el.parentNode,
                     ancient = parent.parentNode,
                     span = document.createElement('span')
+
                 if (nodename(parent) === 'span') {
                     if (clr) {
                         parent.setAttribute('style', 'color:' + clr + ';')
                     } else {
                         // 移除span
                         ancient.insertBefore($el, parent)
-                        ancient.removeChild(parent)
+                        rg.removeChild(ancient, parent, $el, 0, $el.length)
                     }
                 } else {
                     // 增加颜色<span>
@@ -1037,7 +1055,7 @@
             }
             rg.save()
             var result = rg.getRangeAllNodes(this.editor.$body.parentNode)
-            console.log(result)
+            console.log("colro elements:", result)
             if (result.start) {
                 partialColor(result.start, color)
             }
@@ -1341,25 +1359,25 @@
         var $menuDiv = document.createElement('div')
         $menuDiv.setAttribute('class', "toolbar-menu toolbar-menu-table")
         $menuDiv.innerHTML ='<div class="menu-create-table" style="display: block;">' +
-            '<table><tbody>' +
-            '<tr><td data-param="1,1"></td><td data-param="1,2"></td><td data-param="1,3"></td><td data-param="1,4"></td><td data-param="1,5"></td><td data-param="1,6"></td></tr>' +
-            '<tr><td data-param="2,1"></td><td data-param="2,2"></td><td data-param="2,3"></td><td data-param="2,4"></td><td data-param="2,5"></td><td data-param="2,6"></td></tr>' +
-            '<tr><td data-param="3,1"></td><td data-param="3,2"></td><td data-param="3,3"></td><td data-param="3,4"></td><td data-param="3,5"></td><td data-param="3,6"></td></tr>' +
-            '<tr><td data-param="4,1"></td><td data-param="4,2"></td><td data-param="4,3"></td><td data-param="4,4"></td><td data-param="4,5"></td><td data-param="4,6"></td></tr>' +
-            '<tr><td data-param="5,1"></td><td data-param="5,2"></td><td data-param="5,3"></td><td data-param="5,4"></td><td data-param="5,5"></td><td data-param="5,6"></td></tr>' +
-            '<tr><td data-param="6,1"></td><td data-param="6,2"></td><td data-param="6,3"></td><td data-param="6,4"></td><td data-param="6,5"></td><td data-param="6,6"></td></tr>' +
-            '</tbody></table></div>' +
-            '<div class="menu-edit-table" style="display: none;">' +
-            '<ul><li><a tabindex="-1" unselectable="on" class="menu-item" href="javascript:;" data-param="deleteRow"><span>删除行</span></a></li>' +
-            '<li><a tabindex="-1" unselectable="on" class="menu-item" href="javascript:;" data-param="insertRowAbove"><span>在上面插入行</span></a></li>' +
-            '<li><a tabindex="-1" unselectable="on" class="menu-item" href="javascript:;" data-param="insertRowBelow"><span>在下面插入行</span></a></li>' +
-            '<li><span class="separator"></span></li>' +
-            '<li><a tabindex="-1" unselectable="on" class="menu-item" href="javascript:;" data-param="deleteCol"><span>删除列</span></a></li>' +
-            '<li><a tabindex="-1" unselectable="on" class="menu-item" href="javascript:;" data-param="insertColLeft"><span>在左边插入列</span></a></li>' +
-            '<li><a tabindex="-1" unselectable="on" class="menu-item" href="javascript:;" data-param="insertColRight"><span>在右边插入列</span></a></li>' +
-            '<li><span class="separator"></span></li>' +
-            '<li><a tabindex="-1" unselectable="on" class="menu-item" href="javascript:;" data-param="deleteTable"><span>删除表格</span></a></li>' +
-            '</ul></div>',
+        '<table><tbody>' +
+'<tr><td data-param="1,1"></td><td data-param="1,2"></td><td data-param="1,3"></td><td data-param="1,4"></td><td data-param="1,5"></td><td data-param="1,6"></td></tr>' +
+'<tr><td data-param="2,1"></td><td data-param="2,2"></td><td data-param="2,3"></td><td data-param="2,4"></td><td data-param="2,5"></td><td data-param="2,6"></td></tr>' +
+'<tr><td data-param="3,1"></td><td data-param="3,2"></td><td data-param="3,3"></td><td data-param="3,4"></td><td data-param="3,5"></td><td data-param="3,6"></td></tr>' +
+'<tr><td data-param="4,1"></td><td data-param="4,2"></td><td data-param="4,3"></td><td data-param="4,4"></td><td data-param="4,5"></td><td data-param="4,6"></td></tr>' +
+'<tr><td data-param="5,1"></td><td data-param="5,2"></td><td data-param="5,3"></td><td data-param="5,4"></td><td data-param="5,5"></td><td data-param="5,6"></td></tr>' +
+'<tr><td data-param="6,1"></td><td data-param="6,2"></td><td data-param="6,3"></td><td data-param="6,4"></td><td data-param="6,5"></td><td data-param="6,6"></td></tr>' +
+      '</tbody></table></div>' +
+      '<div class="menu-edit-table" style="display: none;">' +
+      '<ul><li><a tabindex="-1" unselectable="on" class="menu-item" href="javascript:;" data-param="deleteRow"><span>删除行</span></a></li>' +
+      '<li><a tabindex="-1" unselectable="on" class="menu-item" href="javascript:;" data-param="insertRowAbove"><span>在上面插入行</span></a></li>' +
+      '<li><a tabindex="-1" unselectable="on" class="menu-item" href="javascript:;" data-param="insertRowBelow"><span>在下面插入行</span></a></li>' +
+      '<li><span class="separator"></span></li>' +
+      '<li><a tabindex="-1" unselectable="on" class="menu-item" href="javascript:;" data-param="deleteCol"><span>删除列</span></a></li>' +
+      '<li><a tabindex="-1" unselectable="on" class="menu-item" href="javascript:;" data-param="insertColLeft"><span>在左边插入列</span></a></li>' +
+      '<li><a tabindex="-1" unselectable="on" class="menu-item" href="javascript:;" data-param="insertColRight"><span>在右边插入列</span></a></li>' +
+      '<li><span class="separator"></span></li>' +
+      '<li><a tabindex="-1" unselectable="on" class="menu-item" href="javascript:;" data-param="deleteTable"><span>删除表格</span></a></li>' +
+      '</ul></div>',
         this.$el.appendChild($menuDiv)
 
         var $div = this.$el.querySelector(".menu-create-table"),
@@ -1452,10 +1470,6 @@
             if (name === 'sp') {
                 var $li = document.createElement('li')
                 $li.innerHTML = '<span class="separator"></span>'
-                $li.addEventListener('click', function(event) {
-                    var range = new Range()
-                    range.range  && console.log(range.range.startContainer, range.range.startOffset, range.range.endContainer, range.range.endOffset)
-                })
                 this.$menuUl.appendChild($li)
                 continue
             } else {
@@ -1632,7 +1646,8 @@
           for (var i = 0; i < this.$body.children.length; i ++, $el = $el.nextSibling){
               // 用于光标在table结尾的情况, 此时如果下一个元素也是table，则无法判别当前光标在上一个table还是下一个table
               // guotie 2014-09-03
-              if (i === offset - 1 && $el.nodeName.toLowerCase() !== 'table' && $el.previousSibling && $el.previousSibling.nodeName.toLowerCase() === 'table') {
+              if (i === offset - 1 && $el.nodeName.toLowerCase() !== 'table' && $el.previousSibling &&
+                   $el.previousSibling.nodeName.toLowerCase() === 'table') {
                   this.$currentEl = $el.previousSibling
               }
               if (i === offset) {
