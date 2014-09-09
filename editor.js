@@ -287,10 +287,10 @@
           function travsel(_start, _end) {
               console.log("travsel start:", _start)
               console.log("travsel end: ", _end)
-              if ((result.end && _start !== result.end.endContainer) || !result.end)
-                result.nodes.push(_start)
+              //if ((result.end && _start !== result.end.endContainer) || !result.end)
+              //  result.nodes.push(_start)
               var _node
-              for(_node = nextNode(_start); _node != _end; _node = nextNode(_node)) {
+              for(_node = _start; _node && _node != _end; _node = nextNode(_node)) {
                   result.nodes.push(_node)
               }
           }
@@ -343,6 +343,7 @@
                   result.end.startContainer = result.end.endContainer = end
                   result.end.startOffset = 0
                   result.end.endOffset = this.range.endOffset
+                  //end = nextNode(end)
               } else {
               // 重新设置结束节点
                 end = nextNode(end)
