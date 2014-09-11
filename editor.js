@@ -155,7 +155,7 @@
             $parent = $oel.parentNode,
             $nel = document.createElement(nTag)
 
-        console.log($parent, $oel, $oel.parentNode)
+        //console.log("tranformTo:", $parent, $oel, $oel.parentNode)
         for ($child = $oel.firstChild; $child !== $oel.lastChild;) {
             $tmp = $child.nextSibling
             $nel.appendChild($child)
@@ -424,24 +424,36 @@
           }
       },
 
-      breakList: function($list, $li) {
-          var $p, $nList,
+      breakList: function($list, $li, tag) {
+          var $p,
+              $el,
+              $ntagList,
+              $nList,
               $start,
               $next,
               $insertPos = $list.nextSibling,
               liPrev = 0,
               liAfter = 0,
               converted = false;
+
+          if (tag) $ntagList = document.createElement(tag)
           for ($start = $list.firstChild; $start; ) {
               $next = $start.nextSibling
               if ($li === $start) {
-                  $p = transformTo($li, 'p')
-                  this.removeChild($list, $li, $p)
+                  if (!tag) {
+                      $p = transformTo($li, 'p')
+                      this.removeChild($list, $li, $p)
+                      $el = $p
+                  } else {
+                      $ntagList.appendChild($li)
+                      $el = $ntagList
+                  }
+
                   if (liPrev > 0) {
-                      $list.parentNode.insertBefore($p, $insertPos)
+                      $list.parentNode.insertBefore($el, $insertPos)
                   } else {
                       // 这是第一个li
-                      $list.parentNode.insertBefore($p, $list)
+                      $list.parentNode.insertBefore($el, $list)
                       return
                   }
                   converted = true
@@ -477,7 +489,9 @@
               $nList,
               $li,
               $parent;
+
           if (!this.range) return;
+
           $first = this.editor.travelUntilTags(this.range.startContainer, ['p', 'li'])
           $last = this.editor.travelUntilTags(this.range.endContainer, ['p', 'li'])
 
@@ -488,7 +502,7 @@
               this.save()
               if (tag === 'ol' || tag === 'ul') {
                   // break list
-                  this.breakList($first.parentNode, $first)
+                  this.breakList($first.parentNode, $first, tag === ntag ? null : ntag)
               } else if (nodename($first) === 'p'){
                   $li = transformTo($first, 'li', false)
                   $nList.appendChild($li)
@@ -784,6 +798,7 @@
         return $el
     },
     onclick: function(event) {
+        this.editor.resetStatus()
         if (this.typ === 'menu') {
             var $el = this.liClicked(event)
             if ($el === this.$el) {
@@ -801,13 +816,14 @@
                 }
             }
         } else if (this.typ === 'basic') {
-            console.log('exec command: ', this.command)
             this.command && document.execCommand(this.command, false)
+            this.editor.fire('statusChange')
+            this.updateStatus(event)
         } else {
             this.exec(event)
+            this.editor.fire('statusChange')
         }
         this.editor.$body.focus()
-        this.editor.fire('statusChange')
         event.preventDefault()
         event.stopPropagation()
         return false
@@ -817,7 +833,16 @@
     // if not active, remove exclude button's disable.
     toggleExclude: function(active) {
         var i, exButton
+        for (i = 0; i < this.editor.$buttons.length; i ++) {
+            exButton = this.editor.$buttons[i]
+            if (exButton.typ === 'basic') {
+                document.queryCommandState(exButton.command) ? exButton.$a.classList.add('active') : exButton.$a.classList.remove('active');
+            } else {
+                exButton.$a.classList.contains('disabled') && exButton.$a.classList.remove('disabled')
+            }
+        }
         if (!this.$exclueBtns) return;
+        console.log('toggle exclude: ', this.name, this.$exclueBtns)
         for (i = 0; i < this.$exclueBtns.length; i ++) {
             exButton = this.$exclueBtns[i]
             if (active) {
@@ -829,7 +854,13 @@
     },
     updateStatus: function(event) {
         if (this.typ === 'basic') {
-            if ( document.queryCommandState(this.command) === true ) {
+            if (document.queryCommandState(this.command)) {
+                this.$a.classList.add('active')
+                this.toggleExclude(true)
+            }
+        } else {
+            console.log(this.name, ' update status ', this.editor.$currentEl, nodename(this.editor.$currentEl))
+            if (nodename(this.editor.$currentEl) === this.name) {
                 this.$a.classList.add('active')
                 this.toggleExclude(true)
             } else {
@@ -876,18 +907,14 @@
   })
 
   TextButton.prototype.execMenuCmd = function(event, cmd) {
-    console.log('execMenuCmd: ', cmd)
       var range = this.range
       range.save()
       range.doCommand('p', function($el) {
-        console.log('text button docommand:', $el, cmd)
         var tag = $el.nodeName
           if (tag === cmd) return $el;
           return transformTo($el, cmd, true)
       })
       range.restore()
-      this.editor.cursorPos()
-      this.updateStatus()
   }
 
   TextButton.prototype.setActive = function(cls) {
@@ -1280,7 +1307,7 @@
             }
             range.restore()
             this.editor.ensureTail()
-            this.updateStatus(active)
+            //this.updateStatus(active)
         },
         updateStatus: function(active) {
             if (active === true || active === false) {
@@ -1304,8 +1331,8 @@
     // this should be ol or ul
     function execList() {
         var range = new Range(this.editor)
-        console.log("range start:", range.range.startContainer, range.range.startOffset)
-        console.log("range end:", range.range.endContainer, range.range.endOffset)
+        console.log("execList: range start:", range.range.startContainer, range.range.startOffset)
+        console.log("execList: range end:", range.range.endContainer, range.range.endOffset)
 
         range.convertToList(this.tag)
     }
@@ -1315,6 +1342,7 @@
         title: '有序列表',
         tag: 'ol',
         typ: 'custom',
+        excludeButtons: ["table"],
         exec: function() {
             execList.call(this)
         }
@@ -1325,6 +1353,7 @@
         title: '无序列表',
         tag: 'ul',
         typ: 'custom',
+        excludeButtons: ["table"],
         exec: function() {
             execList.call(this)
         }
@@ -1464,6 +1493,7 @@
   var _editors = []
   var JustEditor = function(selector, options) {
     this.$buttons = []
+    this.$buttonMaps = Object.create(null)
     this.$menuButtons = []
     this.options = _extend(defaultOptions, options || {}, true)
 
@@ -1530,6 +1560,10 @@
             }
 
             this.$buttons.push(btn)
+            if (btn.name === 'title') {
+                this.$buttonMaps['h4'] = this.$buttonMaps['h1'] = this.$buttonMaps['h2'] = this.$buttonMaps['h3'] = btn
+            }
+            if(btn.tag) this.$buttonMaps[btn.tag] = btn;
             if (btn.typ === 'menu') {
                 this.$menuButtons.push(btn)
             }
@@ -1644,8 +1678,39 @@
       },
     updateStatus: function(eventName) {
         console.log("updateStatus:", eventName)
+        this.cursorPos()
+        var range = new Range(this.editor),
+            el,
+            name
+
+        if (!range.range || !range.range.collapsed) {
+            if (range.range.startContainer !== range.range.endContainer) return
+        }
+        this.basicStatus()
+        for (el = range.range.startContainer; el !== this.$body; el = el.parentNode) {
+            name = nodename(el)
+            console.log('updateStatus: button: ', name)
+            if (this.$buttonMaps[name]) {
+                console.log("call button ", name, " update status")
+                this.$buttonMaps[name].updateStatus(event)
+            }
+        }
+    },
+    basicStatus: function() {
+        var tag, cmds = {'bold': 'b', 'italic':'i', 'underline': 'u', 'strikethrough': 'strike'}
+        for ( var key in cmds ) {
+            if (hasOwn.call(cmds, key)) {
+                tag = cmds[key]
+                document.queryCommandState(key) ? this.$buttonMaps[tag].$a.classList.add('active') : this.$buttonMaps[tag].$a.classList.remove('active');
+            }
+        }
+    },
+    resetStatus: function() {
+        var btn
         for (var i = 0; i < this.$buttons.length; i ++) {
-            this.$buttons[i].updateStatus(eventName)
+            btn = this.$buttons[i]
+            btn.$a.classList.remove('active')
+            btn.$a.classList.remove('disabled')
         }
     },
     onBlur: function(event) {
@@ -1666,8 +1731,8 @@
         if (this.$body.innerHTML.trim() === '') {
             this._browser.createEmptyP(this.$body)
         }
-        this.cursorPos()
         // 更新toolbar status
+        this.resetStatus()
         this.updateStatus(event, range)
     },
     onKeydown: function(event) {
@@ -1695,8 +1760,18 @@
               this._browser.createEmptyP(this.$body, false)
           }
       },
-      keydownEnter: function(event) {
-        console.log("key down enter")
+      keydownEnter: function(event) {    },
+      keyupEnter: function(event) {
+          console.log("key up enter")
+          var statusChanged = false, i,
+              cmds = ['bold', 'italic', 'underline', 'strikethrough']
+          for (i = 0; i < cmds.length; i ++) {
+              if (document.queryCommandState(cmds[i])) {
+                  document.execCommand(cmds[i])
+                  statusChanged = true
+              }
+          }
+          statusChanged && this.updateStatus()
       },
       keyupDel: function(event) {
       },
@@ -1746,7 +1821,6 @@
               return this.topLevelEle($el, offset)
           }
           $parent = $el.parentNode
-          console.log("cursorPos: ", range.startContainer, range.startOffset)
           while ($parent !== this.$body && $el !== this.$body) {
               console.log('cursor pos travel:', $el, 'parent:', $parent)
               $el = $parent
