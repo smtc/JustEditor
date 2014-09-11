@@ -453,7 +453,7 @@
   padding: 0;
 }
 .justeditor .je-body table, .editor-style table {
-  width: auto;
+  width: 100%;
   table-layout: fixed;
   border-collapse: collapse;
   border-spacing: 0;
@@ -472,6 +472,9 @@
 }
 .justeditor .je-body table td.active, .editor-style table td.active {
   background-color: #ffffee;
+}
+tbody {
+    display: table-row-group;
 }
 .justeditor .je-body img, .editor-style img {
   max-width: 800px;

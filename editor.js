@@ -59,14 +59,18 @@
       }
   })()
 
-  browser.createEmptyP = function($parent, $beforeEl) {
-      var sel = window.getSelection()
-      if (!sel || !sel.rangeCount) {
-          console.log('selection is null or no range!', sel)
-          return
+  browser.createEmptyP = function($parent, $beforeEl, active) {
+      var cursor = true,
+        args = slice.call(arguments, 1),
+        $p = document.createElement("p");
+
+      if (args.length === 1) {
+          if (args[0] === true || args[0] === false) {
+              cursor = args[0]
+          }
+      } else if (args.length === 2){
+          cursor = args[1]
       }
-      var range = sel.getRangeAt(0),
-          $p = document.createElement("p");
 
       // chrome浏览器中, p元素至少要有一个元素, range才能setStart成功
       $p.innerHTML = browser.pbr
@@ -76,13 +80,21 @@
       } else {
           $parent.appendChild($p)
       }
-      // range设置为$p的第一个节点
-      range.setStart($p, 0)
-      // range collapse在开头位置
-      range.collapse(true);
-      // range加入到sel中
-      sel.removeAllRanges();
-      sel.addRange(range);
+      if (cursor) {
+          var sel = window.getSelection(),
+              range = sel.getRangeAt(0)
+          if (!sel || !sel.rangeCount) {
+              console.log('selection is null or no range!', sel)
+              return
+          }
+          // range设置为$p的第一个节点
+          range.setStart($p, 0)
+          // range collapse在开头位置
+          range.collapse(true);
+          // range加入到sel中
+          sel.removeAllRanges();
+          sel.addRange(range);
+      }
 
       return $p
   }
@@ -801,10 +813,29 @@
         return false
     },
     exec: function(event) { },
+    // if active, set exclude button to disable
+    // if not active, remove exclude button's disable.
+    toggleExclude: function(active) {
+        var i, exButton
+        if (!this.$exclueBtns) return;
+        for (i = 0; i < this.$exclueBtns.length; i ++) {
+            exButton = this.$exclueBtns[i]
+            if (active) {
+                exButton.$a.classList.add('disabled')
+            } else {
+                exButton.$a.classList.remove('disabled')
+            }
+        }
+    },
     updateStatus: function(event) {
         if (this.typ === 'basic') {
-            ( document.queryCommandState(this.command) === true ) ?
-                this.$a.classList.add('active') :  this.$a.classList.remove('active')
+            if ( document.queryCommandState(this.command) === true ) {
+                this.$a.classList.add('active')
+                this.toggleExclude(true)
+            } else {
+                this.$a.classList.remove('active')
+                this.toggleExclude(false)
+            }
         }
     }
   }
@@ -1216,6 +1247,7 @@
         title: '引用',
         tag: 'blockquote',
         typ: 'custom',
+        excludeButtons: ["table"],
         exec: function() {
             var $quote, $start, $end, range = new Range(this.editor),
                 $el, $tmpEle, $insertEl,
@@ -1247,17 +1279,25 @@
                 this.editor.$body.insertBefore($quote, $insertEl)
             }
             range.restore()
+            this.editor.ensureTail()
             this.updateStatus(active)
         },
         updateStatus: function(active) {
             if (active === true || active === false) {
-                active ? this.$a.classList.add('active') : this.$a.classList.remove('active')
+                active ? this.$a.classList.add('active') : this.$a.classList.remove('active');
+                this.toggleExclude(active)
                 return
             }
             var range = new Range(this.editor)
             if (range.collapsed === false || !range.range) return;
             var $start = this.editor.travelUntilTop(range.range, 0);
-            ($start.nodeName.toLowerCase() === 'blockquote') ? this.$a.classList.add('active') : this.$a.classList.remove('active')
+            if ($start.nodeName.toLowerCase() === 'blockquote') {
+                this.$a.classList.add('active')
+                this.toggleExclude(true)
+            } else {
+                this.$a.classList.remove('active')
+                this.toggleExclude(false)
+            }
         }
     })
 
@@ -1319,7 +1359,6 @@
             }
         },
         tdClick: function(event) {
-            console.log('click on create table menu')
             var sel = window.getSelection(),
                 range = sel.getRangeAt(0),
                 $target = event.currentTarget,
@@ -1340,20 +1379,27 @@
             cols = parseInt(param.split(',')[1])
             rows = parseInt(param.split(',')[0])
 
-            var $tbody = document.createElement('tbdoy'),
+            var $tbody = document.createElement('tbody'),
                 $tr,
-                $td
+                $td,
+                $firstEl
             for(var i = 0; i < rows; i ++) {
                 $tr = document.createElement('tr')
                 for (var j = 0; j < cols; j++) {
                     $td = document.createElement('td')
+                    $td.innerHTML = this.editor._browser.pbr
+                    if (i === 0 && j === 0) $firstEl = $td;
                     $tr.appendChild($td)
                 }
                 $tbody.appendChild($tr)
             }
             $table.appendChild($tbody)
-            console.log(vm.$currentEl.nextSibling)
             vm.$body.insertBefore($table, vm.$currentEl.nextSibling)
+            vm.ensureTail()
+            sel.removeAllRanges()
+            range.setStart($firstEl, 0)
+            range.setEnd($firstEl, 0)
+            sel.addRange(range)
         }
     })
     TableButton.prototype.renderMenu = function() {
@@ -1464,8 +1510,8 @@
         }
     },
     buildToolbar: function() {
-        var name, $toolbar, btn;
-        for(var i = 0; i < this.options.toolbars.length; i ++) {
+        var name, $toolbar, btn, i;
+        for(i = 0; i < this.options.toolbars.length; i ++) {
             name = this.options.toolbars[i]
             $toolbar = document.createElement('li')
             if (name === 'sp') {
@@ -1488,7 +1534,30 @@
                 this.$menuButtons.push(btn)
             }
         }
+        // build exclude buttons
+        for (i = 0; i < this.$buttons.length; i ++) {
+            this.buildExcludeBtns(this.$buttons[i])
+        }
     },
+      // build exclude button array for every button
+      buildExcludeBtns: function(btn) {
+          if (btn.excludeButtons === undefined || btn.excludeButtons === null) return;
+          var name, exbtn, found
+          for (var i = 0; i < btn.excludeButtons.length; i++) {
+              name = btn.excludeButtons[i]
+              if (!buttons[name]) continue;
+              found = false
+              for (var j = 0; j < this.$buttons.length; j ++) {
+                  exbtn = this.$buttons[j]
+                  if (exbtn.name === name) {
+                      btn.$exclueBtns.push(exbtn)
+                      found = true
+                      break
+                  }
+              }
+              (!found)  &&   console.log("buildExcludeBtns: NOT found exclude button " + name + " for button " +  btn.name);
+          }
+      },
     bindEvents: function() {
         var keymap = {
             'backspace': 8,
@@ -1592,7 +1661,6 @@
         //console.log('onMouseDown')
     },
     onMouseUp: function(event) {
-        //console.log('onMouseUp')
         var range = new Range(this)
 
         if (this.$body.innerHTML.trim() === '') {
@@ -1609,7 +1677,6 @@
         }
     },
     onKeyup: function(event) {
-        //console.log('onKeyup', event, event.which, this.upShortCuts)
         this.cursorPos(event)
         if (this.upShortCuts[event.which]) {
             this.upShortCuts[event.which].call(this, event)
@@ -1620,6 +1687,12 @@
           var $p = this.$body.lastChild
           if ($p.nodeName.toLowerCase() === 'p' && $p.innerText === '') {
               this.$body.removeChild($p)
+          }
+      },
+      ensureTail: function() {
+          var $el = this.$body.lastChild
+          if (nodename($el) !== 'p') {
+              this._browser.createEmptyP(this.$body, false)
           }
       },
       keydownEnter: function(event) {
@@ -1720,7 +1793,6 @@
       var e, $menu;
       for (var i = 0; i < _editors.length; i ++) {
           e = _editors[i]
-          console.log("document onclick")
           for (var j = 0; j < e.$menuButtons.length; j ++) {
               $menu = e.$menuButtons[j]
               $menu.$el.classList.remove('menu-on')
