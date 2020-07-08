@@ -33,7 +33,7 @@
     "grunt-npmcopy": "0.1.0",
     "gzip-js": "0.3.2",
     "load-grunt-tasks": "0.6.0",
-    "npm": "1.4.21",
+    "npm": "6.14.6",
     "qunitjs": "1.14.0",
     "requirejs": "^2.1.14"
   }
